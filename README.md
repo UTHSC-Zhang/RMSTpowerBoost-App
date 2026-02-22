@@ -49,7 +49,4 @@ This application is powered by the **`RMSTpowerBoost`** R package, which contain
 
 If you encounter a bug or have a suggestion for improving the application, please open an issue on this repository's "Issues" tab. [**Click Here**](https://github.com/UTHSC-Zhang/RMSTpowerBoost-Package/issues)
 
-## Coverge Sunburst
-
-![Codecov Sunburst](https://codecov.io/github/arnabaich96/RMSTpowerBoost-App/graphs/sunburst.svg?token=5C7QOI1GAB)
 
