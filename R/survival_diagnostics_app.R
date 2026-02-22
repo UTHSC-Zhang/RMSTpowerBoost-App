@@ -23,9 +23,9 @@
   
   if (length(unique(df[[arm_var]])) >= 2) {
     surv_formula_logrank <- if (is.null(strata_var)) {
-      as.formula(paste("Surv(", time_var, ",", status_var, ") ~", arm_var))
+      stats::as.formula(paste("Surv(", time_var, ",", status_var, ") ~", arm_var))
     } else {
-      as.formula(paste("Surv(", time_var, ",", status_var, ") ~", arm_var, "+ strata(", strata_var, ")"))
+      stats::as.formula(paste("Surv(", time_var, ",", status_var, ") ~", arm_var, "+ strata(", strata_var, ")"))
     }
     logrank_test <- survival::survdiff(surv_formula_logrank, data = df)
     p_value <- stats::pchisq(logrank_test$chisq, length(logrank_test$n) - 1, lower.tail = FALSE)
@@ -42,7 +42,7 @@
   }
   
   # --- 2. Generate Kaplan-Meier Plot ---
-  surv_formula <- as.formula(paste("Surv(", time_var, ",", status_var, ") ~", arm_var))
+  surv_formula <- stats::as.formula(paste("Surv(", time_var, ",", status_var, ") ~", arm_var))
   # Calculate fit using the specified alpha for the confidence level
   conf_value <- 1 - alpha
   survfit_formals <- names(formals(survival::survfit.formula))
@@ -95,7 +95,7 @@
   
   # If a strata variable is present, create a faceted plot
   if (!is.null(strata_var)) {
-    km_plot <- km_plot + ggplot2::facet_wrap(as.formula(paste("~", strata_var))) +
+    km_plot <- km_plot + ggplot2::facet_wrap(stats::as.formula(paste("~", strata_var))) +
       ggplot2::labs(title = "Kaplan-Meier Curves by Stratum and Treatment Arm")
   }
   

@@ -22,3 +22,5 @@ ignore:
   - "rsconnect/**"
   - "sim.data/**"
   - "app.R"
+  - "R/generate_app_method_datasets.R"
+  - "**/R/generate_app_method_datasets.R"

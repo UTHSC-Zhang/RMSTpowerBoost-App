@@ -91,7 +91,8 @@ DC.power.analytical.app <- function(pilot_data,
                                     sample_sizes,
                                     linear_terms = NULL,
                                     L,
-                                    alpha = 0.05) {
+                                    alpha = 0.05,
+                                    point_cb = NULL) {
 
    # 1) Estimate parameters from pilot data
    params <- .estimate_dependent_censoring_params(
@@ -104,7 +105,11 @@ DC.power.analytical.app <- function(pilot_data,
    power_values <- sapply(sample_sizes, function(n_per_arm) {
       total_n <- n_per_arm * 2
       se_final <- params$se_beta_n1 / sqrt(total_n)
-      stats::pnorm((abs(params$beta_effect) / se_final) - z_alpha)
+      power <- stats::pnorm((abs(params$beta_effect) / se_final) - z_alpha)
+      if (is.function(point_cb)) {
+         try(point_cb(n_per_arm, power), silent = TRUE)
+      }
+      power
    })
 
    results_df <- data.frame(N_per_Arm = sample_sizes, Power = power_values)
@@ -113,13 +118,19 @@ DC.power.analytical.app <- function(pilot_data,
    p <- ggplot2::ggplot(results_df, ggplot2::aes(x = N_per_Arm, y = Power)) +
       ggplot2::geom_line(color = "#0072B2", linewidth = 1) +
       ggplot2::geom_point(color = "#0072B2", size = 3) +
+      ggplot2::geom_text(
+         ggplot2::aes(label = sprintf("N=%s\nP=%.3f", N_per_Arm, Power)),
+         vjust = -0.6, size = 3, color = "#0072B2", check_overlap = TRUE
+      ) +
+      ggplot2::scale_y_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0.02, 0.12))) +
+      ggplot2::coord_cartesian(ylim = c(0, 1.05), clip = "off") +
       ggplot2::labs(
          title = "Analytic Power Curve: RMST with Covariate-Dependent Censoring (IPCW)",
-         subtitle = "Single censoring mechanism; variance ignores uncertainty in Ĝ.",
+         subtitle = "Single censoring mechanism; variance ignores uncertainty in G-hat.",
          x = "Sample Size Per Arm", y = "Estimated Power"
       ) +
-      ggplot2::ylim(0, 1) +
-      ggplot2::theme_minimal()
+      ggplot2::theme_minimal() +
+      ggplot2::theme(plot.margin = ggplot2::margin(10, 20, 10, 10))
 
    results_summary <- data.frame(
       Statistic = "Assumed RMST Difference (from pilot)",
@@ -152,7 +163,8 @@ DC.ss.analytical.app <- function(pilot_data,
                                  alpha = 0.05,
                                  n_start = 50,
                                  n_step = 25,
-                                 max_n_per_arm = 2000) {
+                                 max_n_per_arm = 2000,
+                                 point_cb = NULL) {
 
    # 1) One-time estimation from pilot data
    params <- .estimate_dependent_censoring_params(
@@ -173,6 +185,9 @@ DC.ss.analytical.app <- function(pilot_data,
       if (!is.finite(calculated_power)) calculated_power <- 0
 
       search_path[[as.character(current_n)]] <- calculated_power
+      if (is.function(point_cb)) {
+         try(point_cb(current_n, calculated_power), silent = TRUE)
+      }
       cat(sprintf("  N = %d/arm, Calculated Power = %.3f\n", current_n, calculated_power))
 
       if (calculated_power >= target_power) { final_n <- current_n; break }
@@ -191,17 +206,24 @@ DC.ss.analytical.app <- function(pilot_data,
       Power = as.numeric(unlist(search_path))
    )
 
-   p <- ggplot2::ggplot(na.omit(search_path_df), ggplot2::aes(x = N_per_Arm, y = Power)) +
+  p <- ggplot2::ggplot(stats::na.omit(search_path_df), ggplot2::aes(x = N_per_Arm, y = Power)) +
       ggplot2::geom_line(color = "#009E73", linewidth = 1) +
       ggplot2::geom_point(color = "#009E73", size = 3) +
+      ggplot2::geom_text(
+         ggplot2::aes(label = sprintf("N=%s\nP=%.3f", N_per_Arm, Power)),
+         vjust = -0.6, size = 3, color = "#009E73", check_overlap = TRUE
+      ) +
       ggplot2::geom_hline(yintercept = target_power, linetype = "dashed", color = "red") +
       ggplot2::geom_vline(xintercept = final_n, linetype = "dotted", color = "blue") +
+      ggplot2::scale_y_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0.02, 0.12))) +
+      ggplot2::coord_cartesian(ylim = c(0, 1.05), clip = "off") +
       ggplot2::labs(
          title = "Analytic Sample Size Search (RMST; Covariate-Dependent Censoring)",
          subtitle = "IPCW-based; single censoring mechanism.",
          x = "Sample Size Per Arm", y = "Calculated Power"
       ) +
-      ggplot2::theme_minimal()
+      ggplot2::theme_minimal() +
+      ggplot2::theme(plot.margin = ggplot2::margin(10, 20, 10, 10))
 
    cat("\n--- Calculation Summary ---\n")
    print(knitr::kable(results_df, caption = "Required Sample Size"))

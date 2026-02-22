@@ -1,0 +1,358 @@
+<!-- pipeline.html — RMSTpowerBoost in-app usage guide (drop-in) -->
+  <div class="pb-hero">
+    <div class="pb-hero-inner">
+      <div class="pb-hero-kicker">RMSTpowerBoost Pipeline</div>
+    <h2 class="pb-hero-title">Power & sample size planning with Restricted Mean Survival Time (RMST)</h2>
+    <p class="pb-hero-sub">
+      This page is the “how-to” for the app. Follow the 3-step workflow below: choose data → map variables & pick a model →
+      run analytical or repeated calculations → export reports.
+    </p>
+
+    <div class="pb-hero-grid">
+      <div class="pb-metric">
+        <div class="pb-metric-label">Inputs</div>
+        <div class="pb-metric-value">Pilot data (.csv) or simulated data</div>
+      </div>
+      <div class="pb-metric">
+        <div class="pb-metric-label">Models</div>
+        <div class="pb-metric-value">IPCW · Stratified · GAM · Dependent censoring</div>
+      </div>
+      <div class="pb-metric">
+        <div class="pb-metric-label">Outputs</div>
+        <div class="pb-metric-value">Power curves · KM plots · Summaries · Reports</div>
+      </div>
+    </div>
+
+    <div class="pb-steps">
+      <div class="pb-step">
+        <div class="pb-step-badge">1</div>
+        <div class="pb-step-body">
+          <div class="pb-step-title">Upload / Generate pilot data</div>
+          <div class="pb-step-text">Provide a dataset with <code>time</code>, <code>status</code>, <code>arm</code> (plus covariates).</div>
+        </div>
+      </div>
+      <div class="pb-step">
+        <div class="pb-step-badge">2</div>
+        <div class="pb-step-body">
+          <div class="pb-step-title">Map columns & choose RMST model</div>
+          <div class="pb-step-text">Select the time/event/treatment columns, then pick the model family and τ.</div>
+        </div>
+      </div>
+      <div class="pb-step">
+        <div class="pb-step-badge">3</div>
+        <div class="pb-step-body">
+          <div class="pb-step-title">Run analysis & export</div>
+          <div class="pb-step-text">Compute power or sample size (analytical or repeated), then download HTML/PDF.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section-card">
+  <h3 class="section-title">Quick start (the 90‑second path)</h3>
+  <ol class="pb-ol">
+    <li><strong>Step 1</strong> (left panel): choose <em>Upload</em> and upload a <code>.csv</code> pilot dataset.</li>
+    <li>When the analysis panel appears, map <strong>Time-to-Event</strong>, <strong>Status (1=event)</strong>, and <strong>Treatment Arm (1=treat)</strong>.</li>
+    <li>Choose <strong>Target Quantity</strong>: <em>Power</em> (enter sample sizes) or <em>Sample Size</em> (enter target power).</li>
+    <li>Set <strong>RMST L (τ)</strong> and <strong>α</strong>. Pick <strong>Analytical</strong> (fast) or <strong>Repeated</strong> (simulation-based).</li>
+    <li>Click <strong>Run</strong>. Review plots and tables, then download the report.</li>
+  </ol>
+</div>
+
+<div class="section-card">
+  <h3 class="section-title">Data requirements</h3>
+  <p class="pb-p">
+    Your pilot dataset must contain at least three columns that you will map in Step 2:
+    <code>time</code> (positive follow-up time), <code>status</code> (1 = event, 0 = censored), and <code>arm</code> (treatment indicator; 1 = treated).
+    Additional covariates are optional but strongly recommended for adjusted/robust planning.
+  </p>
+
+  <div class="pb-grid-2">
+    <div class="pb-callout pb-callout-info">
+      <div class="pb-callout-title">Recommended coding</div>
+      <ul class="pb-ul">
+        <li><code>time</code>: numeric, in days (or your study unit), strictly &gt; 0.</li>
+        <li><code>status</code>: 0/1. If your file uses “Yes/No”, convert to 0/1 before upload.</li>
+        <li><code>arm</code>: 0/1 or a 2-level factor. The app treats 1 as the treatment arm.</li>
+      </ul>
+    </div>
+
+    <div class="pb-callout pb-callout-warn">
+      <div class="pb-callout-title">Common gotchas</div>
+      <ul class="pb-ul">
+        <li>Missing values in mapped columns will usually break model fitting.</li>
+        <li>Non-binary <code>status</code> (e.g., 1/2) needs recoding.</li>
+        <li>More than two treatment levels: collapse to two arms before upload.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="pb-mini-table-wrap">
+    <div class="pb-mini-table-title">Minimal example schema</div>
+    <table class="pb-mini-table">
+      <thead>
+        <tr>
+          <th>Column</th>
+          <th>Type</th>
+          <th>Meaning</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><code>time</code></td><td>numeric</td><td>follow-up time</td></tr>
+        <tr><td><code>status</code></td><td>0/1</td><td>1 = event, 0 = censored</td></tr>
+        <tr><td><code>arm</code></td><td>0/1</td><td>1 = treated, 0 = control</td></tr>
+        <tr><td><code>x1, x2, …</code></td><td>mixed</td><td>baseline covariates (optional)</td></tr>
+        <tr><td><code>strata</code></td><td>factor</td><td>needed only for stratified models</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+  <div class="section-card">
+    <h3 class="section-title">Step 1. Data Upload or Generate</h3>
+
+  <div class="pb-grid-2">
+    <div>
+      <h4 class="pb-h4">Upload pilot data</h4>
+      <p class="pb-p">Use this when you have real study or pilot data and want the app to learn empirical survival/censoring patterns.</p>
+      <ul class="pb-ul">
+        <li>Accepted: <code>.csv</code> (the uploader is configured for CSV).</li>
+        <li>Keep the file “rectangular”: one row per subject, one column per variable.</li>
+        <li>If you have dates, pre-compute durations before upload.</li>
+      </ul>
+    </div>
+    <div>
+      <h4 class="pb-h4">Generate pilot data (built-in simulator)</h4>
+      <p class="pb-p">Use this when you are prototyping or running scenario planning without a pilot dataset.</p>
+      <ul class="pb-ul">
+        <li>Build covariates (continuous/categorical), then set the event-time model (AFT/PH/PWExponential).</li>
+        <li>Choose allocation ratio, treatment effect, target censoring, and seed (optional).</li>
+        <li>Click <strong>Generate</strong>. Data, Summary, and KM Plot tabs refresh on each generate run.</li>
+        <li>After confirming covariates, panel <strong>1B</strong> opens and panel <strong>1A</strong> folds (it stays available).</li>
+      </ul>
+    </div>
+  </div>
+
+  <details class="pb-details">
+    <summary>Simulator notes (what the controls mean)</summary>
+    <div class="pb-details-body">
+      <ul class="pb-ul">
+        <li><strong>Allocation (a:b)</strong>: randomized ratio, e.g. <code>1:1</code>, <code>2:1</code>.</li>
+        <li><strong>Treatment β (arm)</strong>: effect of the treatment indicator in the chosen event-time model (sign interpretation depends on AFT vs PH).</li>
+        <li><strong>Target censoring</strong>: desired censoring proportion; used to calibrate censoring distribution.</li>
+        <li><strong>Transform (continuous only)</strong>: applied after generation as <code>(x - a) / b</code>.</li>
+      </ul>
+    </div>
+  </details>
+</div>
+
+<div class="section-card">
+  <h3 class="section-title">Step 2: Map variables & pick the RMST model</h3>
+
+  <p class="pb-p">
+    Once data exist, the “Model & Analysis” panel becomes available. First map the required columns:
+    <strong>Time-to-Event</strong>, <strong>Status</strong>, and <strong>Treatment Arm</strong>. Some models require additional inputs:
+    stratified models need a <strong>Stratification Variable</strong>; dependent censoring needs covariates for the censoring Cox model.
+  </p>
+
+  <div class="pb-mini-table-wrap">
+    <div class="pb-mini-table-title">Model guide (when to use what)</div>
+    <table class="pb-mini-table">
+      <thead>
+        <tr>
+          <th>RMST model</th>
+          <th>Use when…</th>
+          <th>Extra mapping</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Linear IPCW Model</strong></td>
+          <td>you want a straightforward adjusted RMST comparison with inverse-probability-of-censoring weights</td>
+          <td>none</td>
+        </tr>
+        <tr>
+          <td><strong>Additive Stratified Model</strong></td>
+          <td>effects differ by strata and you want additive structure across strata</td>
+          <td><code>strata</code> required</td>
+        </tr>
+        <tr>
+          <td><strong>Multiplicative Stratified Model</strong></td>
+          <td>you prefer multiplicative structure across strata</td>
+          <td><code>strata</code> required</td>
+        </tr>
+        <tr>
+          <td><strong>Semiparametric (GAM) Model</strong></td>
+          <td>nonlinear covariate effects are plausible and you want flexible adjustment</td>
+          <td>none</td>
+        </tr>
+        <tr>
+          <td><strong>Dependent Censoring Model</strong></td>
+          <td>censoring may depend on covariates and you want an explicit censoring model</td>
+          <td>choose <em>censoring model covariates</em></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pb-callout pb-callout-tip">
+    <div class="pb-callout-title">Choosing τ (RMST L)</div>
+    <p class="pb-p">
+      Pick τ within the reliable support of follow-up. Practically: choose τ near a clinically meaningful horizon (e.g., 6/12 months),
+      but not so large that almost everyone is censored before τ. If in doubt, start with a percentile of observed follow-up (e.g., 70–80%).
+    </p>
+  </div>
+</div>
+
+<div class="section-card">
+  <h3 class="section-title">Step 3: Power vs Sample size, Analytical vs Repeated</h3>
+
+  <div class="pb-grid-2">
+    <div>
+      <h4 class="pb-h4">Target quantity</h4>
+      <ul class="pb-ul">
+        <li><strong>Power</strong>: provide a comma-separated list of candidate sample sizes (per arm / per stratum).</li>
+        <li><strong>Sample Size</strong>: provide a target power; the app searches for a suitable N.</li>
+      </ul>
+    </div>
+    <div>
+      <h4 class="pb-h4">Calculation method</h4>
+      <ul class="pb-ul">
+        <li><strong>Analytical</strong>: fastest; best for iterative planning and sensitivity analysis.</li>
+        <li><strong>Repeated</strong>: simulation-based; set replications <code>R</code> (≥ 500 recommended) and an optional seed.</li>
+      </ul>
+    </div>
+  </div>
+
+  <details class="pb-details">
+    <summary>What “Repeated” does (high level)</summary>
+    <div class="pb-details-body">
+      <p class="pb-p">
+        For each candidate sample size, the app repeatedly simulates/bootstraps realizations under the pilot-data mechanism,
+        recomputes the test statistic, and estimates power as the rejection proportion at level α.
+      </p>
+      <ul class="pb-ul">
+        <li>Higher <code>R</code> reduces Monte Carlo error (but increases runtime).</li>
+        <li>Use a seed when you want reproducibility across runs or reports.</li>
+      </ul>
+    </div>
+  </details>
+</div>
+
+  <div class="section-card">
+    <h3 class="section-title">Where to look for results</h3>
+  <div class="pb-grid-2">
+    <div class="pb-callout pb-callout-info">
+      <div class="pb-callout-title">Tabs</div>
+      <ul class="pb-ul">
+        <li><strong>Data</strong>: current dataset and export tools</li>
+        <li><strong>Summary</strong>: data summary first, then histograms</li>
+        <li><strong>KM Plot</strong>: Kaplan–Meier curves</li>
+        <li><strong>Analysis</strong>: key results, power/sample-size tables, analysis summary, and power plot</li>
+      </ul>
+    </div>
+    <div class="pb-callout pb-callout-info">
+      <div class="pb-callout-title">Tables & logs</div>
+      <ul class="pb-ul">
+        <li>Key results summary</li>
+        <li>Analysis summary and data summary</li>
+        <li>Console/run log (what happened, warnings, failures)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="pb-callout pb-callout-tip">
+    <div class="pb-callout-title">Reports</div>
+    <p class="pb-p">
+      Download HTML (most robust) and PDF (requires LaTeX such as TinyTeX/MiKTeX) after a successful run.
+    </p>
+  </div>
+  </div>
+
+  <div class="section-card">
+    <h3 class="section-title">Step 4. Analysis</h3>
+    <p class="pb-p">
+      Run the analysis after mapping inputs. Results populate the plots, tables, and run log, and the report downloads become available.
+    </p>
+  </div>
+
+  <div class="section-card">
+    <h3 class="section-title">Troubleshooting (fast fixes)</h3>
+
+  <details class="pb-details">
+    <summary>“Please map Time/Status/Arm column”</summary>
+    <div class="pb-details-body">
+      <p class="pb-p">Map the correct columns in Step 2. The app will default to the first columns if it can’t detect names like <code>time</code>, <code>status</code>, <code>arm</code>.</p>
+    </div>
+  </details>
+
+  <details class="pb-details">
+    <summary>Status coding looks wrong (power is nonsense)</summary>
+    <div class="pb-details-body">
+      <ul class="pb-ul">
+        <li>Ensure <code>status = 1</code> indicates the event (not censoring).</li>
+        <li>If your event indicator is reversed, fix it before upload (or create a new column and map that one).</li>
+      </ul>
+    </div>
+  </details>
+
+  <details class="pb-details">
+    <summary>Dependent censoring model fails</summary>
+    <div class="pb-details-body">
+      <p class="pb-p">Pick covariates for the censoring Cox model. Avoid including treatment; the app excludes it by design.</p>
+    </div>
+  </details>
+
+  <details class="pb-details">
+    <summary>PDF report fails to render</summary>
+    <div class="pb-details-body">
+      <p class="pb-p">Use the HTML report first. If you need PDF, install TinyTeX/MiKTeX and re-run; LaTeX errors will appear in the log.</p>
+    </div>
+  </details>
+
+  <div class="pb-footer-note">
+    Last updated: 2026-02-07. Reset Workflow is available from the left panel.
+  </div>
+</div>
+
+<style>
+/* Scoped styles (pb-*) to avoid fighting Bootstrap/Shiny defaults. */
+.pb-hero{border-radius:18px;padding:18px 18px 10px;margin:8px 0 18px;background:linear-gradient(135deg, rgba(13,110,253,.10), rgba(32,201,151,.10));border:1px solid rgba(0,0,0,.06)}
+.pb-hero-inner{max-width:980px}
+.pb-hero-kicker{letter-spacing:.12em;text-transform:uppercase;font-weight:700;font-size:.78rem;opacity:.8}
+.pb-hero-title{margin:8px 0 6px;font-weight:800}
+.pb-hero-sub{max-width:880px;opacity:.9;margin:0 0 14px}
+.pb-hero-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:10px 0 14px}
+.pb-metric{background:rgba(255,255,255,.72);border:1px solid rgba(0,0,0,.06);border-radius:14px;padding:10px 12px}
+.pb-metric-label{font-size:.82rem;opacity:.8;margin-bottom:2px}
+.pb-metric-value{font-weight:700}
+.pb-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:8px 0 6px}
+.pb-step{display:flex;gap:10px;align-items:flex-start;background:rgba(255,255,255,.72);border:1px solid rgba(0,0,0,.06);border-radius:14px;padding:10px 12px}
+.pb-step-badge{width:28px;height:28px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-weight:800;background:rgba(13,110,253,.14)}
+.pb-step-title{font-weight:800;margin-top:1px}
+.pb-step-text{opacity:.9;font-size:.95rem}
+.pb-ol{margin:0 0 0 1.1rem}
+.pb-grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.pb-ul{margin:0 0 0 1.1rem}
+.pb-p{margin:0 0 10px}
+.pb-h4{margin:0 0 6px;font-weight:800}
+.pb-callout{border-radius:14px;padding:10px 12px;border:1px solid rgba(0,0,0,.06);background:rgba(255,255,255,.72)}
+.pb-callout-title{font-weight:800;margin-bottom:4px}
+.pb-callout-info{background:linear-gradient(180deg, rgba(13,110,253,.08), rgba(255,255,255,.72))}
+.pb-callout-warn{background:linear-gradient(180deg, rgba(255,193,7,.12), rgba(255,255,255,.72))}
+.pb-callout-tip{background:linear-gradient(180deg, rgba(32,201,151,.10), rgba(255,255,255,.72))}
+.pb-mini-table-wrap{margin-top:12px}
+.pb-mini-table-title{font-weight:800;margin:0 0 6px}
+.pb-mini-table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid rgba(0,0,0,.08);border-radius:14px;overflow:hidden;background:rgba(255,255,255,.72)}
+.pb-mini-table th,.pb-mini-table td{padding:10px 10px;border-bottom:1px solid rgba(0,0,0,.06);vertical-align:top}
+.pb-mini-table thead th{background:rgba(0,0,0,.03);font-weight:800}
+.pb-mini-table tbody tr:last-child td{border-bottom:none}
+.pb-details{border:1px solid rgba(0,0,0,.08);border-radius:14px;padding:10px 12px;background:rgba(255,255,255,.72);margin-top:10px}
+.pb-details > summary{cursor:pointer;font-weight:800}
+.pb-details-body{margin-top:8px}
+.pb-footer-note{margin-top:12px;opacity:.75;font-size:.85rem}
+@media (max-width: 900px){
+  .pb-hero-grid,.pb-steps,.pb-grid-2{grid-template-columns:1fr}
+}
+</style>

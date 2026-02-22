@@ -1,0 +1,9 @@
+utils::globalVariables(c(
+  ".",
+  ".data",
+  "mu0_hat",
+  "N_per_Arm",
+  "N_per_Group",
+  "N_per_Stratum",
+  "Power"
+))

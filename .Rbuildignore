@@ -1,2 +1,14 @@
 ^renv$
 ^renv\.lock$
+^.*\.Rproj$
+^\.Rproj\.user$
+^LICENSE\.md$
+^RMSTpowerBoost-App\.code-workspace$
+^codecov\.yml$
+^rsconnect$
+^sim\.data$
+^data-raw$
+^\.github$
+^app\.R$
+^www$
+^manifest\.json$

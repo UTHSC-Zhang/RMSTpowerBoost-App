@@ -20,7 +20,7 @@
    # Model with stratum-specific intercepts and stratum-specific treatment effects
    all_terms <- c(strata_var, paste0(strata_var, ":", arm_var), linear_terms)
    model_rhs <- paste(all_terms[!sapply(all_terms, is.null)], collapse = " + ")
-   model_formula <- as.formula(paste("log_pseudo_obs ~", model_rhs))
+  model_formula <- stats::as.formula(paste("log_pseudo_obs ~", model_rhs))
    message("Model: log(pseudo_obs) ~ ", model_rhs)
    test_term_pattern <- paste0(":", arm_var, "1$")
 
@@ -165,7 +165,7 @@ MS.power.boot.app <- function(pilot_data, time_var, status_var, arm_var, strata_
    results_summary <- NULL
    # Use estimates from the largest sample size simulation for the summary
    if (length(sim_outputs) > 0) {
-      est <- na.omit(sim_outputs[[length(sim_outputs)]]$estimates)
+      est <- stats::na.omit(sim_outputs[[length(sim_outputs)]]$estimates)
       if (length(est) > 1) {
          results_summary <- data.frame(
             Statistic = c("Mean RMST Ratio", "95% CI Lower", "95% CI Upper"),
@@ -178,11 +178,18 @@ MS.power.boot.app <- function(pilot_data, time_var, status_var, arm_var, strata_
    p <- ggplot2::ggplot(results_df, ggplot2::aes(x = N_per_Stratum, y = Power)) +
       ggplot2::geom_line(color = "#E69F00", linewidth = 1) +
       ggplot2::geom_point(color = "#E69F00", size = 3) +
+      ggplot2::geom_text(
+         ggplot2::aes(label = sprintf("N=%s\nP=%.3f", N_per_Stratum, Power)),
+         vjust = -0.6, size = 3, color = "#E69F00", check_overlap = TRUE
+      ) +
+      ggplot2::scale_y_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0.02, 0.12))) +
+      ggplot2::coord_cartesian(ylim = c(0, 1.05), clip = "off") +
       ggplot2::labs(
          title = "Power Curve: Multiplicative Stratified RMST Model",
          x = "Sample Size Per Stratum", y = "Estimated Power"
       ) +
-      ggplot2::ylim(0, 1) + ggplot2::theme_minimal()
+      ggplot2::theme_minimal() +
+      ggplot2::theme(plot.margin = ggplot2::margin(10, 20, 10, 10))
 
    # --- Final Output ---
    end_time <- proc.time()
@@ -296,7 +303,7 @@ MS.ss.boot.app <- function(pilot_data, time_var, status_var, arm_var, strata_var
    # --- Finalize Summary and Results ---
    results_summary <- NULL
    if (!is.null(best_sim_output)) {
-      est <- na.omit(best_sim_output$estimates)
+      est <- stats::na.omit(best_sim_output$estimates)
       if (length(est) > 1) {
          results_summary <- data.frame(
             Statistic = c("Mean RMST Ratio", "95% CI Lower", "95% CI Upper"),
@@ -309,16 +316,23 @@ MS.ss.boot.app <- function(pilot_data, time_var, status_var, arm_var, strata_var
    search_path_df <- data.frame(N_per_Stratum = as.integer(names(search_path)), Power = unlist(search_path))
 
    # --- Create Plot ---
-   p <- ggplot2::ggplot(na.omit(search_path_df), ggplot2::aes(x = N_per_Stratum, y = Power)) +
+  p <- ggplot2::ggplot(stats::na.omit(search_path_df), ggplot2::aes(x = N_per_Stratum, y = Power)) +
       ggplot2::geom_line(color = "#009E73", linewidth = 1) +
       ggplot2::geom_point(color = "#009E73", size = 3) +
+      ggplot2::geom_text(
+         ggplot2::aes(label = sprintf("N=%s\nP=%.3f", N_per_Stratum, Power)),
+         vjust = -0.6, size = 3, color = "#009E73", check_overlap = TRUE
+      ) +
       ggplot2::geom_hline(yintercept = target_power, linetype = "dashed", color = "red") +
       ggplot2::geom_vline(xintercept = final_n, linetype = "dotted", color = "blue") +
+      ggplot2::scale_y_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0.02, 0.12))) +
+      ggplot2::coord_cartesian(ylim = c(0, 1.05), clip = "off") +
       ggplot2::labs(
          title = "Sample Size Search Path: Multiplicative Stratified RMST Model",
          x = "Sample Size Per Stratum", y = "Calculated Power"
       ) +
-      ggplot2::theme_minimal()
+      ggplot2::theme_minimal() +
+      ggplot2::theme(plot.margin = ggplot2::margin(10, 20, 10, 10))
 
    # --- Final Output ---
    end_time <- proc.time()

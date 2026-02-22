@@ -397,15 +397,20 @@ gen_covariates <- function(n, covariates) {
 simulate_from_recipe <- function(recipe, seed = NULL) {
   if (!is.list(recipe)) stop("`recipe` must be a list (no YAML paths).")
   recipe <- validate_recipe(recipe)
-  # replace the whole seed block with:
-  if (!is.null(seed)) {
-     oseed <- .Random.seed
-     on.exit({ if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) .Random.seed <<- oseed }, add = TRUE)
-     set.seed(seed)
-  } else if (!is.null(recipe$seed)) {
-     oseed <- .Random.seed
-     on.exit({ if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) .Random.seed <<- oseed }, add = TRUE)
-     set.seed(recipe$seed)
+  chosen_seed <- if (!is.null(seed)) seed else recipe$seed
+  if (!is.null(chosen_seed)) {
+     had_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+     if (had_seed) {
+       old_seed <- get(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+     }
+     on.exit({
+       if (had_seed) {
+         assign(".Random.seed", old_seed, envir = .GlobalEnv)
+       } else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+         rm(".Random.seed", envir = .GlobalEnv)
+       }
+     }, add = TRUE)
+     set.seed(chosen_seed)
   }
 
   n <- recipe$n

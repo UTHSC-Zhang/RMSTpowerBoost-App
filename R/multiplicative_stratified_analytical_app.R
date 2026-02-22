@@ -15,7 +15,7 @@
   df <- pilot_data[stats::complete.cases(pilot_data[, all_vars]), ]
   n_pilot <- nrow(df)
   min_events_per_stratum <- 2 # Define a minimum threshold
-  event_counts <- stats::aggregate(as.formula(paste(status_var, "~", strata_var)), 
+  event_counts <- stats::aggregate(stats::as.formula(paste(status_var, "~", strata_var)), 
                             data = df, 
                             FUN = sum)
   
@@ -55,7 +55,7 @@
       }
     }
   }
-  df$weights <- exp(df$H_cens * exp(predict(fit_cens, newdata = df, type="lp", reference="zero")))
+  df$weights <- exp(df$H_cens * exp(stats::predict(fit_cens, newdata = df, type="lp", reference="zero")))
   
   # Stabilize weights
   finite_weights <- df$weights[is.finite(df$weights)]
@@ -78,13 +78,13 @@
     stop("Not enough data points to fit the approximation model after filtering.", call. = FALSE)
   }
   
-  fit_log_lm <- lm(log_model_formula, data = fit_data, weights = fit_weights)
+  fit_log_lm <- stats::lm(log_model_formula, data = fit_data, weights = fit_weights)
   
-  beta_summary <- coef(summary(fit_log_lm))
+  beta_summary <- stats::coef(summary(fit_log_lm))
   beta_effect <- beta_summary[arm_var, "Estimate"]
   
   # --- 2. Calculate Asymptotic Variance from the approximate model ---
-  V_hat <- vcov(fit_log_lm) * nrow(fit_data) # Scale to Var(sqrt(n)*beta)
+  V_hat <- stats::vcov(fit_log_lm) * nrow(fit_data) # Scale to Var(sqrt(n)*beta)
   var_beta_n1 <- V_hat[arm_var, arm_var]
   se_beta_n1 <- sqrt(var_beta_n1)
   
@@ -108,7 +108,8 @@
 #' @keywords internal
 #' @export
 MS.power.analytical.app <- function(pilot_data, time_var, status_var, arm_var, strata_var,
-                                sample_sizes, linear_terms = NULL, L, alpha = 0.05) {
+                                sample_sizes, linear_terms = NULL, L, alpha = 0.05,
+                                point_cb = NULL) {
   
   # 1. Estimate parameters from pilot data
   params <- .estimate_multiplicative_stratified_params(pilot_data, time_var, status_var, arm_var, strata_var, linear_terms, L)
@@ -120,6 +121,9 @@ MS.power.analytical.app <- function(pilot_data, time_var, status_var, arm_var, s
     total_n <- n_per_stratum * params$n_strata
     se_final <- params$se_beta_n1 / sqrt(total_n)
     power <- stats::pnorm( (abs(params$beta_effect) / se_final) - z_alpha )
+    if (is.function(point_cb)) {
+      try(point_cb(n_per_stratum, power), silent = TRUE)
+    }
     return(power)
   })
   
@@ -129,12 +133,19 @@ MS.power.analytical.app <- function(pilot_data, time_var, status_var, arm_var, s
   p <- ggplot2::ggplot(results_df, ggplot2::aes(x = N_per_Stratum, y = Power)) +
     ggplot2::geom_line(color = "#E69F00", linewidth = 1) +
     ggplot2::geom_point(color = "#E69F00", size = 3) +
+    ggplot2::geom_text(
+      ggplot2::aes(label = sprintf("N=%s\nP=%.3f", N_per_Stratum, Power)),
+      vjust = -0.6, size = 3, color = "#E69F00", check_overlap = TRUE
+    ) +
+    ggplot2::scale_y_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0.02, 0.12))) +
+    ggplot2::coord_cartesian(ylim = c(0, 1.05), clip = "off") +
     ggplot2::labs(
       title = "Analytic Power Curve: Multiplicative Stratified RMST Model",
       subtitle = "Approximate method based on Wang et al. (2019).",
       x = "Sample Size Per Stratum", y = "Estimated Power"
     ) +
-    ggplot2::ylim(0, 1) + ggplot2::theme_minimal()
+    ggplot2::theme_minimal() +
+    ggplot2::theme(plot.margin = ggplot2::margin(10, 20, 10, 10))
   
   results_summary <- data.frame(
     Statistic = "Assumed log(RMST Ratio) (from pilot)",
@@ -159,7 +170,8 @@ MS.power.analytical.app <- function(pilot_data, time_var, status_var, arm_var, s
 #' @export
 MS.ss.analytical.app <- function(pilot_data, time_var, status_var, arm_var, strata_var,
                              target_power, linear_terms = NULL, L, alpha = 0.05,
-                             n_start = 50, n_step = 25, max_n_per_arm = 2000) {
+                             n_start = 50, n_step = 25, max_n_per_arm = 2000,
+                             point_cb = NULL) {
   
   # 1. Estimate parameters from pilot data
   params <- .estimate_multiplicative_stratified_params(pilot_data, time_var, status_var, arm_var, strata_var, linear_terms, L)
@@ -178,6 +190,9 @@ MS.ss.analytical.app <- function(pilot_data, time_var, status_var, arm_var, stra
     if (!is.finite(calculated_power)) calculated_power <- 0
     
     search_path[[as.character(current_n)]] <- calculated_power
+    if (is.function(point_cb)) {
+      try(point_cb(current_n, calculated_power), silent = TRUE)
+    }
     cat(paste0("  N = ", current_n, "/stratum, Calculated Power = ", round(calculated_power, 3), "\n"))
     
     if (calculated_power >= target_power) {
@@ -197,16 +212,23 @@ MS.ss.analytical.app <- function(pilot_data, time_var, status_var, arm_var, stra
   results_df <- data.frame(Target_Power = target_power, Required_N_per_Stratum = final_n)
   search_path_df <- data.frame(N_per_Stratum = as.integer(names(search_path)), Power = unlist(search_path))
   
-  p <- ggplot2::ggplot(na.omit(search_path_df), ggplot2::aes(x = N_per_Stratum, y = Power)) +
+  p <- ggplot2::ggplot(stats::na.omit(search_path_df), ggplot2::aes(x = N_per_Stratum, y = Power)) +
     ggplot2::geom_line(color = "#009E73", linewidth = 1) +
     ggplot2::geom_point(color = "#009E73", size = 3) +
+    ggplot2::geom_text(
+      ggplot2::aes(label = sprintf("N=%s\nP=%.3f", N_per_Stratum, Power)),
+      vjust = -0.6, size = 3, color = "#009E73", check_overlap = TRUE
+    ) +
     ggplot2::geom_hline(yintercept = target_power, linetype = "dashed", color = "red") +
     ggplot2::geom_vline(xintercept = final_n, linetype = "dotted", color = "blue") +
+    ggplot2::scale_y_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0.02, 0.12))) +
+    ggplot2::coord_cartesian(ylim = c(0, 1.05), clip = "off") +
     ggplot2::labs(
       title = "Analytic Sample Size Search: Multiplicative Stratified RMST Model",
       subtitle = "Power calculated from formula at each step (approximate method).",
       x = "Sample Size Per Stratum", y = "Calculated Power"
-    ) + ggplot2::theme_minimal()
+    ) + ggplot2::theme_minimal() +
+    ggplot2::theme(plot.margin = ggplot2::margin(10, 20, 10, 10))
   
   cat("\n--- Calculation Summary ---\n")
   print(knitr::kable(results_df, caption = "Required Sample Size"))

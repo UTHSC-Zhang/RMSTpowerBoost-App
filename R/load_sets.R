@@ -5,14 +5,15 @@
 #' Load datasets from a recipe-sets manifest
 #'
 #' Reads a \code{manifest.rds} created by \code{generate_recipe_sets()}, loads one
-#' dataset per row (preferring \code{rds} → \code{rdata} → \code{csv} → \code{txt}),
+#' dataset per row (preferring \code{rds} -> \code{rdata} -> \code{csv} -> \code{txt}),
 #' restores attribute \code{"achieved_censoring"}, and returns a named list
 #' of \code{list(data = <data.frame>, meta = <list>)}.
 #' @param manifest_path Path to \code{manifest.rds}.
 #' @return A named list where each element is \code{list(data=..., meta=...)}.
 #' @examples
 #' \dontrun{
-#' sets <- load_recipe_sets("checks/manifest.rds")
+#' manifest_path <- file.path(tempdir(), "rmstpb_checks", "manifest.rds")
+#' sets <- load_recipe_sets(manifest_path)
 #' names(sets)
 #' str(sets[[1]]$meta)
 #' }

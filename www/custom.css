@@ -1,0 +1,235 @@
+:root {
+  --pb-bg-1: #f9fbf6;
+  --pb-bg-2: #e8f4ed;
+  --pb-accent: #0b6e4f;
+  --pb-accent-2: #ff7a18;
+  --pb-ink: #1f2b2a;
+  --pb-border: #d8e4dc;
+  --pb-card: rgba(255, 255, 255, 0.86);
+}
+body {
+  color: var(--pb-ink);
+  font-size: 1.03rem;
+  line-height: 1.5;
+  background:
+    radial-gradient(circle at 8% 6%, rgba(11, 110, 79, 0.10), transparent 28%),
+    radial-gradient(circle at 93% 14%, rgba(255, 122, 24, 0.14), transparent 24%),
+    linear-gradient(135deg, var(--pb-bg-1), var(--pb-bg-2));
+}
+.container-fluid {
+  width: 100%;
+  max-width: none;
+}
+.app-shell {
+  animation: shell-enter 420ms ease-out both;
+}
+@keyframes shell-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.title-panel h2,
+.title-panel h3 {
+  letter-spacing: 0.04em;
+}
+.well, .panel, .tab-content, .shiny-input-container {
+  border-radius: 14px;
+}
+.form-control, .selectize-input, .irs, .btn, .shiny-input-container label {
+  font-size: 1rem;
+}
+.shiny-input-container {
+  margin-bottom: 14px;
+}
+.well {
+  padding: 18px;
+}
+.well, .panel-default > .panel-heading, .tab-content {
+  border: 1px solid var(--pb-border);
+}
+.well, .tab-content {
+  background: var(--pb-card);
+  backdrop-filter: blur(3px);
+}
+.nav-tabs > li > a {
+  border-radius: 10px 10px 0 0;
+  font-weight: 600;
+}
+.nav-tabs > li.active > a,
+.nav-tabs > li.active > a:hover {
+  color: var(--pb-accent);
+  border-color: var(--pb-border) var(--pb-border) transparent;
+}
+.btn-primary {
+  background: linear-gradient(120deg, var(--pb-accent), #0a9f6f);
+  border-color: transparent;
+}
+.btn-primary:hover, .btn-primary:focus {
+  background: linear-gradient(120deg, #095a42, var(--pb-accent));
+}
+.btn-success {
+  background: linear-gradient(120deg, #198754, #2cb67d);
+  border-color: transparent;
+}
+.btn-default {
+  border: 1px solid var(--pb-border);
+}
+.irs--shiny .irs-bar,
+.irs--shiny .irs-single {
+  background: var(--pb-accent-2);
+  border-color: var(--pb-accent-2);
+}
+.dataTables_wrapper .dataTables_paginate .paginate_button.current {
+  border: 1px solid var(--pb-accent) !important;
+  background: #e3f1eb !important;
+  color: var(--pb-accent) !important;
+}
+.section-card {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--pb-border);
+  border-radius: 14px;
+  padding: 18px 20px;
+  margin-bottom: 14px;
+}
+.section-title {
+  margin-top: 0;
+  margin-bottom: 6px;
+  letter-spacing: 0.03em;
+}
+.section-lead {
+  margin-bottom: 10px;
+  color: #415654;
+}
+.metric-note {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--pb-border);
+  background: #f1f8f4;
+  color: #1f5e4a;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+@media (max-width: 992px) {
+  .container-fluid {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .well {
+    padding: 14px;
+  }
+}
+
+/* ------------------------------------------------------------
+   RMSTpowerBoost professional skin (non-invasive)
+   - keeps Bootstrap 5 + bootswatch underneath
+   - focuses on spacing, typographic hierarchy, and affordances
+   ------------------------------------------------------------ */
+
+/* Typography + headings */
+.title-panel {
+  margin-bottom: 0.75rem;
+}
+.title-panel h2 {
+  font-size: 2.05rem;
+  margin-bottom: 0.1rem;
+}
+.title-panel h3 {
+  font-size: 1.25rem;
+}
+
+/* Cards / panels */
+.well, .tab-content, .section-card {
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.06);
+}
+.well h4, .section-card h4 {
+  font-weight: 700;
+  margin-top: 0.1rem;
+}
+
+/* Form controls */
+.shiny-input-container label {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.form-control:focus,
+.selectize-input.focus,
+.selectize-input:focus {
+  border-color: var(--pb-accent) !important;
+  box-shadow: 0 0 0 0.20rem rgba(11, 110, 79, 0.18) !important;
+}
+
+/* Buttons */
+.btn {
+  border-radius: 12px;
+  padding: 0.5rem 0.85rem;
+  font-weight: 700;
+}
+.btn:focus {
+  box-shadow: 0 0 0 0.20rem rgba(11, 110, 79, 0.22);
+}
+.btn.btn-success {
+  box-shadow: 0 10px 20px rgba(25, 135, 84, 0.20);
+}
+.btn.btn-primary {
+  box-shadow: 0 10px 20px rgba(11, 110, 79, 0.18);
+}
+
+/* Tabs */
+.nav-tabs {
+  border-bottom: 1px solid var(--pb-border);
+}
+.tab-content {
+  padding: 14px;
+}
+
+/* DataTables */
+table.dataTable thead th,
+table.dataTable thead td {
+  border-bottom: 1px solid var(--pb-border) !important;
+}
+.dataTables_wrapper .dataTables_filter input,
+.dataTables_wrapper .dataTables_length select {
+  border-radius: 10px;
+}
+
+/* Small utility classes */
+.pb-mt-8 { margin-top: 8px; }
+.pb-mt-12 { margin-top: 12px; }
+.pb-mb-8 { margin-bottom: 8px; }
+.workflow-btn {
+  width: 100%;
+  min-height: 38px;
+}
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .app-shell { animation: none !important; }
+}
+
+#theme_widget_container {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 1400;
+}
+
+.theme-widget-open {
+  min-width: 96px;
+}
+
+.theme-widget-panel {
+  width: min(320px, calc(100vw - 24px));
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--pb-border);
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.12);
+}
+
+.theme-widget-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-weight: 700;
+}

@@ -1,11 +1,13 @@
 Package: RMSTpowerBoostApp
 Type: Package
 Title: RMSTpowerBoost Shiny App Utilities
-Version: 0.0.0.9000
+Version: 0.0.1
 Authors@R: person("Arnab", "Aich", email = "118152677+arnabaich96@users.noreply.github.com", role = c("aut", "cre"))
 Description: Shiny application and analysis utilities for RMST power and sample size calculations.
 License: MIT + file LICENSE
 Encoding: UTF-8
+Depends:
+    R (>= 3.5.0)
 LazyData: true
 Imports:
     stats,
@@ -13,6 +15,7 @@ Imports:
     survival,
     ggplot2,
     dplyr,
+    magrittr,
     mgcv,
     future,
     future.apply,
@@ -20,4 +23,17 @@ Imports:
     scales
 Suggests:
     testthat (>= 3.0.0),
-    covr
+    covr,
+    bslib,
+    DT,
+    shiny,
+    shinyjs,
+    plotly,
+    kableExtra,
+    rmarkdown,
+    purrr,
+    stringr,
+    tibble,
+    tidyr,
+    shinytest2
+RoxygenNote: 7.3.3
