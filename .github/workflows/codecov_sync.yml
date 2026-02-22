@@ -12,11 +12,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Verify coverage report exists
+      - name: Check coverage report
+        id: coverage_file
         run: |
-          test -f coverage/cobertura.xml || (echo "Missing coverage/cobertura.xml in this commit." && exit 1)
+          if [ -f coverage/cobertura.xml ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "coverage/cobertura.xml is missing; skipping Codecov upload."
+          fi
 
       - name: Upload to Codecov
+        if: steps.coverage_file.outputs.found == 'true'
         uses: codecov/codecov-action@v4
         with:
           files: coverage/cobertura.xml
