@@ -1,7 +1,7 @@
-name: Sync Coverage Report to Codecov
+name: Upload Coverage Reports to Codecov
 
 on:
-push:
+  push:
     branches: [main]
   pull_request:
 
@@ -23,17 +23,25 @@ jobs:
           needs: |
             coverage
 
-      - name: Run coverage
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      - name: Generate coverage.xml
         run: >
           Rscript -e "cov <- covr::package_coverage(
           type = 'tests',
-          line_exclusions = list('R/generate_app_method_datasets.R' = 1:100000)
-          ); covr::codecov(coverage = cov, quiet = FALSE)"
+          line_exclusions = list('R/generate_app_method_datasets.R' = 1:10000)
+          ); covr::to_cobertura(cov, filename = 'coverage.xml')"
 
-      - name: Upload test results to Codecov
+      - name: Verify coverage.xml exists
+        run: |
+          test -f coverage.xml
+          wc -c coverage.xml
+
+      - name: Upload coverage to Codecov
         if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@v1
+        uses: codecov/codecov-action@v5
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          disable_search: true
+          fail_ci_if_error: true
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
