@@ -24,16 +24,16 @@ jobs:
             coverage
 
       - name: Run coverage
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         run: >
           Rscript -e "cov <- covr::package_coverage(
           type = 'tests',
           line_exclusions = list('R/generate_app_method_datasets.R' = 1:100000)
-          ); covr::codecov(coverage = cov, quiet = FALSE)"
+          ); covr::to_cobertura(cov, filename = 'coverage.xml')"
 
-      - name: Upload test results to Codecov
+      - name: Upload coverage to Codecov
         if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@v1
+        uses: codecov/codecov-action@v5
         with:
+          files: ./coverage.xml
+          fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
