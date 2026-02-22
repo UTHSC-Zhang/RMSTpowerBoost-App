@@ -6,6 +6,28 @@ This repository contains the source code for the `RMSTpowerBoost` web applicatio
 
 -----
 
+## Coverage + Codecov Flow
+
+Coverage is generated locally into `coverage/` by the `pre-push` hook.
+
+To enable it once:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+The hook writes:
+- `coverage/cobertura.xml`
+- `coverage/coverage.rds`
+- `coverage/summary.txt`
+
+GitHub Actions does not run tests/coverage generation. It only uploads `coverage/cobertura.xml` from the pushed commit to Codecov.
+So `coverage/cobertura.xml` must be committed before pushing.
+
+If `Rscript` is not on PATH, the hook checks common Windows installs under `C:/Program Files/R/...`.
+
+-----
+
 ## Access the Live Application
 
 The easiest way to use the calculator is to access the live, deployed version directly in your web browser. No installation is required.

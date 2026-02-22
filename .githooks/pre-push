@@ -1,0 +1,30 @@
+#!/usr/bin/env sh
+set -eu
+
+echo "[pre-push] Building local coverage artifacts..."
+
+if command -v Rscript >/dev/null 2>&1; then
+  RSCRIPT_BIN="$(command -v Rscript)"
+else
+  RSCRIPT_BIN=""
+  for candidate in \
+    /c/Program\ Files/R/bin/Rscript.exe \
+    /c/Program\ Files/R/*/bin/Rscript.exe \
+    C:/Program\ Files/R/bin/Rscript.exe \
+    C:/Program\ Files/R/*/bin/Rscript.exe
+  do
+    if [ -x "$candidate" ]; then
+      RSCRIPT_BIN="$candidate"
+      break
+    fi
+  done
+fi
+
+if [ -z "${RSCRIPT_BIN}" ]; then
+  echo "[pre-push] ERROR: Rscript not found in PATH or under C:/Program Files/R" >&2
+  exit 1
+fi
+
+"$RSCRIPT_BIN" -e "if (!requireNamespace('covr', quietly = TRUE)) stop('Install covr', call. = FALSE); if (!requireNamespace('xml2', quietly = TRUE)) stop('Install xml2', call. = FALSE); dir.create('coverage', showWarnings = FALSE, recursive = TRUE); cov <- covr::package_coverage(quiet = FALSE); covr::to_cobertura(cov, filename = 'coverage/cobertura.xml'); saveRDS(cov, 'coverage/coverage.rds'); writeLines(sprintf('percent_coverage=%.2f', covr::percent_coverage(cov)), 'coverage/summary.txt')"
+
+echo "[pre-push] Wrote coverage/cobertura.xml, coverage/coverage.rds, coverage/summary.txt"

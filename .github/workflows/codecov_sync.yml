@@ -6,30 +6,19 @@ on:
   pull_request:
 
 jobs:
-  coverage:
+  upload-coverage:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup R
-        uses: r-lib/actions/setup-r@v2
+      - name: Verify coverage report exists
+        run: |
+          test -f coverage/cobertura.xml || (echo "Missing coverage/cobertura.xml in this commit." && exit 1)
 
-      - name: Setup dependencies
-        uses: r-lib/actions/setup-r-dependencies@v2
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
         with:
-          extra-packages: |
-            any::covr
-          needs: |
-            coverage
-
-      - name: Run coverage
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-        run: Rscript -e "covr::codecov(quiet = FALSE)"
-
-      - name: Upload test results to Codecov
-        if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@v1
-        with:
+          files: coverage/cobertura.xml
           token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
