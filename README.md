@@ -1,4 +1,4 @@
-# RMSTpowerBoost: Interactive Power and Sample Size Calculator  [![codecov](https://codecov.io/github/arnabaich96/RMSTpowerBoost-App/graph/badge.svg?token=5C7QOI1GAB)](https://codecov.io/github/arnabaich96/RMSTpowerBoost-App)
+# RMSTpowerBoost: Interactive Power and Sample Size Calculator  [![codecov](https://codecov.io/github/UTHSC-Zhang/RMSTpowerBoost-App/graph/badge.svg?token=RLAPUB8Q6I)](https://codecov.io/github/UTHSC-Zhang/RMSTpowerBoost-App)
 
 This repository documents and assembles the RMSTpowerBoost Shiny application as an engineering system.  
 This README is for contributors and maintainers: architecture, module boundaries, data flow, and quality wiring.
