@@ -17,10 +17,23 @@ jobs:
         run: |
           if [ -f coverage/cobertura.xml ]; then
             echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Coverage file found: coverage/cobertura.xml"
           else
             echo "found=false" >> "$GITHUB_OUTPUT"
             echo "coverage/cobertura.xml is missing; skipping Codecov upload."
           fi
+
+      - name: Coverage diagnostics
+        if: always()
+        run: |
+          echo "## Coverage diagnostics" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- found output: \`${{ steps.coverage_file.outputs.found }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- git tracked coverage files:" >> "$GITHUB_STEP_SUMMARY"
+          git ls-files coverage >> "$GITHUB_STEP_SUMMARY" || true
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Directory listing:" >> "$GITHUB_STEP_SUMMARY"
+          ls -la coverage >> "$GITHUB_STEP_SUMMARY" 2>&1 || echo "coverage directory not present" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload to Codecov
         if: steps.coverage_file.outputs.found == 'true'
