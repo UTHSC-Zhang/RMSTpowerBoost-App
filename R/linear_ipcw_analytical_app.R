@@ -22,11 +22,13 @@
   df$Y_rmst <- pmin(df[[time_var]], L)
   df$is_censored <- df[[status_var]] == 0
   df$is_event <- df[[status_var]] == 1
+  df$is_complete <- df$is_event | df[[time_var]] >= L
   
   # Fit censoring model (Kaplan-Meier for G(t))
-  cens_fit <- survival::survfit(survival::Surv(Y_rmst, is_censored) ~ 1, data = df)
+  cens_formula <- stats::as.formula(paste0("survival::Surv(", time_var, ", is_censored) ~ 1"))
+  cens_fit <- survival::survfit(cens_formula, data = df)
   cens_surv_prob <- stats::stepfun(cens_fit$time, c(1, cens_fit$surv))(df$Y_rmst)
-  df$weights <- df$is_event / cens_surv_prob
+  df$weights <- df$is_complete / cens_surv_prob
   
   # Stabilize weights
   finite_weights <- df$weights[is.finite(df$weights) & df$weights > 0]

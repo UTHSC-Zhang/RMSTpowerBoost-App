@@ -28,23 +28,24 @@
       boot_data <- do.call(rbind, boot_list)
       boot_data[[arm_var]] <- factor(boot_data[[arm_var]], levels = c(0, 1))
       
+      boot_data$Y_rmst <- pmin(boot_data[[time_var]], L)
       is_censored <- boot_data[[status_var]] == 0
+      is_complete <- boot_data[[status_var]] == 1 | boot_data[[time_var]] >= L
       cens_fit <- tryCatch(survival::survfit(Surv(boot_data[[time_var]], is_censored) ~ 1), error = function(e) NULL)
       if (is.null(cens_fit)) next
-      surv_summary <- tryCatch(summary(cens_fit, times = pmin(boot_data[[time_var]], L), extend = TRUE), error = function(e) NULL)
+      surv_summary <- tryCatch(summary(cens_fit, times = boot_data$Y_rmst, extend = TRUE), error = function(e) NULL)
       if (is.null(surv_summary)) next
       
-      weights <- 1 / surv_summary$surv
-      finite_weights <- weights[is.finite(weights)]
+      weights <- is_complete / surv_summary$surv
+      finite_weights <- weights[is.finite(weights) & weights > 0]
       if (length(finite_weights) > 0) {
         weight_cap <- stats::quantile(finite_weights, probs = 0.99, na.rm = TRUE)
         weights[weights > weight_cap] <- weight_cap
       }
-      weights[!is.finite(weights)] <- NA
+      weights[!is.finite(weights) | !is_complete] <- 0
       
-      boot_data$Y_rmst <- pmin(boot_data[[time_var]], L)
-      fit_data <- boot_data[boot_data[[status_var]] == 1 & is.finite(weights), ]
-      fit_weights <- weights[boot_data[[status_var]] == 1 & is.finite(weights)]
+      fit_data <- boot_data[weights > 0, ]
+      fit_weights <- weights[weights > 0]
       
       if (nrow(fit_data) > (length(all_vars) + 1)) {
         fit <- tryCatch(stats::lm(model_formula, data = fit_data, weights = fit_weights), error = function(e) NULL)

@@ -33,9 +33,10 @@
   # Prepare data for IPCW
   df$Y_rmst <- pmin(df[[time_var]], L)
   df$is_event <- df[[status_var]] == 1
+  df$is_complete <- df$is_event | df[[time_var]] >= L
   
   # Model for censoring (stratified by strata_var)
-  cens_formula <- stats::as.formula(paste0("survival::Surv(Y_rmst, is_event == 0) ~ ",
+  cens_formula <- stats::as.formula(paste0("survival::Surv(", time_var, ", ", status_var, " == 0) ~ ",
                                            paste(covariates, collapse = " + "),
                                            " + strata(", strata_var, ")"))
   fit_cens <- survival::coxph(cens_formula, data = df, ties = "breslow")
@@ -43,17 +44,20 @@
   # Calculate IPCW weights
   bh_cens <- survival::basehaz(fit_cens, centered = FALSE)
   df$H_cens <- 0
-  unique_strata_from_bh <- unique(bh_cens$strata)
+  # basehaz() labels strata either as "level" or "strata_var=level" depending
+  # on the survival package version; accept both and fail loudly if neither
+  # matches, since silently missing strata would zero out the censoring hazard
+  bh_labels <- if (is.null(bh_cens$strata)) NULL else as.character(bh_cens$strata)
   for(st in unique(df[[strata_var]])){
-    st_label <- paste0(strata_var, "=", st)
     is_stratum <- df[[strata_var]] == st
-    if (st_label %in% unique_strata_from_bh) {
-      is_bh_stratum <- bh_cens$strata == st_label
-      if(sum(is_bh_stratum) > 0){
-        H_st <- stats::stepfun(bh_cens$time[is_bh_stratum], c(0, bh_cens$hazard[is_bh_stratum]))(df$Y_rmst[is_stratum])
-        df$H_cens[is_stratum] <- H_st
-      }
+    is_bh_stratum <- if (is.null(bh_labels)) rep(TRUE, nrow(bh_cens)) else
+      bh_labels == as.character(st) | bh_labels == paste0(strata_var, "=", st)
+    if (sum(is_bh_stratum) == 0) {
+      stop("Could not locate the baseline censoring hazard for stratum '", st,
+           "'; IPCW weights cannot be computed.", call. = FALSE)
     }
+    H_st <- stats::stepfun(bh_cens$time[is_bh_stratum], c(0, bh_cens$hazard[is_bh_stratum]))(df$Y_rmst[is_stratum])
+    df$H_cens[is_stratum] <- H_st
   }
   df$weights <- exp(df$H_cens * exp(stats::predict(fit_cens, newdata = df, type="lp", reference="zero")))
   
@@ -64,7 +68,7 @@
     df$weights[df$weights > weight_cap] <- weight_cap
   }
   df$weights[!is.finite(df$weights)] <- 0
-  df$w_delta <- df$weights * df$is_event
+  df$w_delta <- df$weights * df$is_complete
   df$w_delta[is.na(df$w_delta)] <- 0
   
   # Use a log-linear model as a practical approximation to the multiplicative model
@@ -84,7 +88,7 @@
   beta_effect <- beta_summary[arm_var, "Estimate"]
   
   # --- 2. Calculate Asymptotic Variance from the approximate model ---
-  V_hat <- stats::vcov(fit_log_lm) * nrow(fit_data) # Scale to Var(sqrt(n)*beta)
+  V_hat <- stats::vcov(fit_log_lm) * n_pilot # Scale to Var(sqrt(n)*beta)
   var_beta_n1 <- V_hat[arm_var, arm_var]
   se_beta_n1 <- sqrt(var_beta_n1)
   

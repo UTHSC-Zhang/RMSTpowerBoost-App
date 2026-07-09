@@ -4,8 +4,9 @@
 #'
 #' This version uses one Cox model for censoring:
 #' \code{Surv(time, status==0) ~ linear_terms} (treatment excluded by default),
-#' builds IPCW \eqn{w_i = 1/\hat G(Y_i\mid X_i)} at \eqn{Y_i=\min(T_i,L)}, fits a weighted
-#' RMST regression, and computes a sandwich variance that ignores uncertainty in \eqn{\hat G}.
+#' builds IPCW \eqn{w_i = \Delta_i^Y/\hat G(Y_i\mid X_i)} at \eqn{Y_i=\min(T_i,L)},
+#' fits a weighted RMST regression among complete truncated outcomes, and computes a
+#' sandwich variance that ignores uncertainty in \eqn{\hat G}.
 #'
 #' @note \code{dep_cens_status_var} is accepted for API compatibility but ignored here.
 #' @return A list with \code{beta_effect} (arm effect) and \code{se_beta_n1} (SE scaled to N=1).
@@ -22,6 +23,8 @@
    if (n_pilot < 10) stop("Too few complete cases after filtering.", call. = FALSE)
 
    df$Y_rmst <- pmin(df[[time_var]], L)
+   df$is_event <- df[[status_var]] == 1
+   df$is_complete <- df$is_event | df[[time_var]] >= L
 
    # --- 2) Censoring model: covariate-dependent only (no arm, no competing risks) ---
    cens_rhs <- if (is.null(linear_terms) || length(linear_terms) == 0) "1" else paste(linear_terms, collapse = " + ")
@@ -36,9 +39,9 @@
    Hc <- H0_step(df$Y_rmst) * exp(lp)
    Ghat <- exp(-Hc)
 
-   # IPCW for all subjects (stabilize and cap heavy tails)
+   # IPCW for subjects whose truncated RMST outcome is observed.
    eps <- 1e-6
-   w <- 1 / pmax(Ghat, eps)
+   w <- df$is_complete / pmax(Ghat, eps)
    w[!is.finite(w)] <- 0
    if (any(is.finite(w) & w > 0)) {
       cap <- stats::quantile(w[is.finite(w) & w > 0], 0.99, na.rm = TRUE)
@@ -49,7 +52,8 @@
    # --- 3) Weighted RMST regression: Y_rmst ~ arm + covariates ---
    model_rhs <- paste(c(arm_var, linear_terms), collapse = " + ")
    model_formula <- stats::as.formula(paste("Y_rmst ~", model_rhs))
-   fit_lm <- stats::lm(model_formula, data = df, weights = df$weights)
+   fit_data <- df[df$weights > 0, ]
+   fit_lm <- stats::lm(model_formula, data = fit_data, weights = fit_data$weights)
    beta_hat <- stats::coef(fit_lm)
    arm_coeff_name <- arm_var
    if (!(arm_coeff_name %in% names(beta_hat))) stop("Arm coefficient not found in model.", call. = FALSE)
