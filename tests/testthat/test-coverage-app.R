@@ -77,29 +77,6 @@ test_that("app coverage harness runs without error", {
                             linear_terms = "x1", L = 2)
     DC.ss.analytical.app(pilot, "time", "status", "arm", "status", target_power = 0.5,
                          linear_terms = "x1", L = 2, n_start = 8, n_step = 2, max_n_per_arm = 12)
-
-    linear.power.boot.app(pilot, "time", "status", "arm", sample_sizes = c(6), linear_terms = "x1",
-                          L = 2, n_sim = 2, alpha = 0.1, parallel.cores = 1)
-    linear.ss.boot.app(pilot, "time", "status", "arm", target_power = 0.5, linear_terms = "x1",
-                       L = 2, n_sim = 2, alpha = 0.1, patience = 1, n_start = 4, n_step = 2,
-                       max_n_per_arm = 6, parallel.cores = 1)
-
-    additive.power.boot.app(pilot, "time", "status", "arm", "strata", sample_sizes = c(6),
-                            linear_terms = "x1", smooth_terms = NULL, L = 2, n_sim = 2,
-                            alpha = 0.1, parallel.cores = 1)
-    additive.ss.boot.app(pilot, "time", "status", "arm", "strata", target_power = 0.5,
-                         linear_terms = "x1", smooth_terms = NULL, L = 2, n_sim = 2,
-                         alpha = 0.1, parallel.cores = 1, patience = 1,
-                         n_start = 4, n_step = 2, max_n_per_arm = 6)
-
-    MS.power.boot.app(pilot, "time", "status", "arm", "strata", sample_sizes = c(6),
-                      linear_terms = "x1", L = 2, n_sim = 2, alpha = 0.1, parallel.cores = 1)
-    MS.ss.boot.app(pilot, "time", "status", "arm", "strata", target_power = 0.5,
-                   linear_terms = "x1", L = 2, n_sim = 2, alpha = 0.1,
-                   parallel.cores = 1, patience = 1, n_start = 4, n_step = 2, max_n_per_arm = 6)
-
-    .run_survival_diagnostics(pilot, "time", "status", "arm", alpha = 0.05)
-    .run_survival_diagnostics(pilot, "time", "status", "arm", strata_var = "strata", alpha = 0.05)
     })
   }, NA)
 })

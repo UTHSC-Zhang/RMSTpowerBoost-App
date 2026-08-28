@@ -992,7 +992,7 @@ ui <- fluidPage(
             fluidRow(
               column(12, selectInput("model_selection", "Select RMST Model",
                                     choices = c("Linear IPCW Model","Additive Stratified Model",
-                                                "Multiplicative Stratified Model","Semiparametric (GAM) Model",
+                                                "Multiplicative Stratified Model",
                                                 "Dependent Censoring Model"),
                                     selected = "Linear IPCW Model"))
             ),
@@ -1129,77 +1129,95 @@ ui <- fluidPage(
 )
 )
 
-# ------------------ Repeated Power (RMST-based; no 'bootstrap' wording) ------------------
-# Each replicate resamples the pilot data and tests the treatment effect on the
-# L-truncated RMST with an IPCW-weighted linear model: the complete-case
-# indicator is deltaY = 1 if the event occurs before L or follow-up reaches L,
-# and weights are deltaY / G(Y) with G the Kaplan-Meier estimate of the
-# censoring distribution. This matches the package's linear IPCW methodology;
-# strata (if any) enter as fixed effects with a common treatment effect.
+# ------------------ Repeated Power (model-aware resampling) ------------------
+# Each replicate resamples the pilot data with replacement (within arm, and
+# within stratum for stratified models) and tests the treatment effect using
+# the estimator of the *selected* RMST model -- the same .estimate_*_params
+# helpers used by the Analytical method -- via a Wald z-test at the replicate's
+# realized sample size. Power is the rejection rate across replicates.
 repeated_power_from_pilot <- function(pilot_df, time_var, status_var, arm_var,
                                       n_per_arm_vec, L, alpha = 0.05, R = 500,
-                                      strata_var = NULL, seed = NULL,
-                                      point_cb = NULL) {
+                                      model = "Linear IPCW Model",
+                                      strata_var = NULL, linear_terms = NULL,
+                                      dep_cens_status_var = NULL,
+                                      seed = NULL, point_cb = NULL) {
   stopifnot(is.data.frame(pilot_df), is.numeric(L), length(L) == 1L, L > 0)
-  needed <- c(time_var, status_var, arm_var, strata_var)
-  needed <- needed[!is.null(needed)]
+  if (!is.null(linear_terms) && !length(linear_terms)) linear_terms <- NULL
+  needed <- unique(c(time_var, status_var, arm_var, strata_var, linear_terms))
   if (!all(needed %in% names(pilot_df))) stop("Required columns not found in pilot data.")
-  df <- pilot_df[, unique(c(time_var, status_var, arm_var, strata_var)), drop = FALSE]
-  names(df)[match(c(time_var, status_var, arm_var), names(df))] <- c("time","status","arm")
-  df$arm <- as.factor(df$arm)
-  if (nlevels(df$arm) != 2L) stop("Repeated method currently expects exactly 2 arms.")
+  df <- pilot_df[, needed, drop = FALSE]
+  df <- df[stats::complete.cases(df), , drop = FALSE]
+  if (length(unique(df[[arm_var]])) != 2L) stop("Repeated method currently expects exactly 2 arms.")
+
+  supported <- c("Linear IPCW Model", "Additive Stratified Model",
+                 "Multiplicative Stratified Model", "Dependent Censoring Model")
+  if (!model %in% supported) {
+    stop("The Repeated method does not support the model: ", model, call. = FALSE)
+  }
+  needs_strata <- model %in% c("Additive Stratified Model", "Multiplicative Stratified Model")
+  if (needs_strata && (is.null(strata_var) || !nzchar(strata_var))) {
+    stop("The ", model, " requires a mapped stratification column for the Repeated method.", call. = FALSE)
+  }
   if (!is.null(seed) && is.finite(seed)) set.seed(as.integer(seed))
 
-  if (!is.null(strata_var)) {
-    names(df)[names(df) == strata_var] <- "stratum"
-    df$stratum <- as.factor(df$stratum)
-    split_stratum <- split(df, df$stratum, drop = TRUE)
-    split_by <- lapply(split_stratum, function(d) split(d, d$arm, drop = TRUE))
+  if (needs_strata) {
+    split_stratum <- split(df, df[[strata_var]], drop = TRUE)
+    split_by <- lapply(split_stratum, function(d) split(d, d[[arm_var]], drop = TRUE))
+    split_by <- Filter(function(by_arm) length(by_arm) == 2L, split_by)
+    if (!length(split_by)) stop("No stratum contains both treatment arms.", call. = FALSE)
   } else {
-    split_by <- split(df, df$arm, drop = TRUE)
+    split_by <- split(df, df[[arm_var]], drop = TRUE)
   }
 
-  rmst_test_p <- function(dat) {
-    dat$Y <- pmin(dat$time, L)
-    dat$deltaY <- as.numeric(dat$status == 1 | dat$time >= L)
-    cens_fit <- tryCatch(survfit(Surv(time, status == 0) ~ 1, data = dat),
-                         error = function(e) NULL)
-    if (is.null(cens_fit)) return(NA_real_)
-    G <- stats::stepfun(cens_fit$time, c(1, cens_fit$surv))(dat$Y)
-    w <- dat$deltaY / pmax(G, 1e-8)
-    pos <- is.finite(w) & w > 0
-    if (sum(pos) < 4L) return(NA_real_)
-    cap <- stats::quantile(w[pos], 0.99, na.rm = TRUE)
-    w[w > cap] <- cap
-    fml <- if ("stratum" %in% names(dat)) Y ~ arm + stratum else Y ~ arm
-    fit <- tryCatch(stats::lm(fml, data = dat[pos, , drop = FALSE], weights = w[pos]),
-                    error = function(e) NULL)
-    if (is.null(fit)) return(NA_real_)
-    cf <- summary(fit)$coefficients
-    arm_row <- grep("^arm", rownames(cf))[1]
-    if (is.na(arm_row)) return(NA_real_)
-    cf[arm_row, "Pr(>|t|)"]
+  estimate_effect <- function(dat) {
+    switch(model,
+      "Linear IPCW Model" =
+        .estimate_linear_ipcw_params(dat, time_var, status_var, arm_var,
+                                     linear_terms, L),
+      "Additive Stratified Model" =
+        .estimate_additive_stratified_params(dat, time_var, status_var, arm_var,
+                                             strata_var, linear_terms, L),
+      "Multiplicative Stratified Model" =
+        .estimate_multiplicative_stratified_params(dat, time_var, status_var, arm_var,
+                                                   strata_var, linear_terms, L),
+      "Dependent Censoring Model" =
+        .estimate_dependent_censoring_params(dat, time_var, status_var, arm_var,
+                                             dep_cens_status_var, linear_terms, L)
+    )
+  }
+
+  wald_p <- function(dat) {
+    est <- tryCatch({
+      # The estimator helpers cat() progress lines; swallow them per replicate.
+      out <- NULL
+      utils::capture.output(
+        out <- suppressWarnings(suppressMessages(estimate_effect(dat)))
+      )
+      out
+    }, error = function(e) NULL)
+    if (is.null(est) || !is.finite(est$beta_effect) || !is.finite(est$se_beta_n1) ||
+        est$se_beta_n1 <= 0) return(NA_real_)
+    se <- est$se_beta_n1 / sqrt(nrow(dat))
+    2 * stats::pnorm(-abs(est$beta_effect) / se)
+  }
+
+  resample <- function(n_arm) {
+    if (needs_strata) {
+      blocks <- lapply(split_by, function(by_arm) {
+        do.call(rbind, lapply(by_arm, function(a)
+          a[sample.int(nrow(a), n_arm, replace = TRUE), , drop = FALSE]))
+      })
+      do.call(rbind, blocks)
+    } else {
+      do.call(rbind, lapply(split_by, function(a)
+        a[sample.int(nrow(a), n_arm, replace = TRUE), , drop = FALSE]))
+    }
   }
 
   out <- lapply(n_per_arm_vec, function(n_arm){
     rej <- rep(NA, R)
     for (r in seq_len(R)) {
-      if (is.null(strata_var)) {
-        s0 <- split_by[[1]][sample.int(nrow(split_by[[1]]), n_arm, replace = TRUE), , drop = FALSE]
-        s1 <- split_by[[2]][sample.int(nrow(split_by[[2]]), n_arm, replace = TRUE), , drop = FALSE]
-        dat <- rbind(s0, s1)
-      } else {
-        blocks <- lapply(split_by, function(by_arm) {
-          a0 <- by_arm[[1]]; a1 <- by_arm[[2]]
-          s0 <- a0[sample.int(nrow(a0), n_arm, replace = TRUE), , drop = FALSE]
-          s1 <- a1[sample.int(nrow(a1), n_arm, replace = TRUE), , drop = FALSE]
-          rbind(s0, s1)
-        })
-        dat <- do.call(rbind, blocks)
-        dat$stratum <- factor(dat$stratum)
-      }
-      dat$arm <- factor(dat$arm)
-      p <- rmst_test_p(dat)
+      p <- wald_p(resample(n_arm))
       rej[r] <- if (is.finite(p)) (p < alpha) else NA
     }
     m <- mean(rej, na.rm = TRUE); k <- sum(is.finite(rej))
@@ -2804,12 +2822,20 @@ server <- function(input, output, session) {
         
         if (input$calc_method == "Repeated") {
           R <- input$R_reps %||% 500
+          repeated_strata_var <- if ("stratum" %in% names(analysis_data)) resolved_strata_var else NULL
+          repeated_linear_terms <- if (input$model_selection == "Dependent Censoring Model") {
+            input$dc_linear_terms %||% character(0)
+          } else {
+            NULL
+          }
           if (input$analysis_type == "Power") {
-            cat(sprintf("Repeated method: estimating power at %d sample sizes with R=%d.\n", length(n_vec), R))
+            cat(sprintf("Repeated method (%s): estimating power at %d sample sizes with R=%d.\n", input$model_selection, length(n_vec), R))
             power_df <- repeated_power_from_pilot(
               pilot_data_clean, resolved_time_var, resolved_status_var, resolved_arm_var,
               n_per_arm_vec = n_vec, L = input$L, alpha = input$alpha, R = R,
-              strata_var = if ("stratum" %in% names(analysis_data)) resolved_strata_var else NULL,
+              model = input$model_selection,
+              strata_var = repeated_strata_var,
+              linear_terms = repeated_linear_terms,
               seed = reps_seed,
               point_cb = point_cb
             )
@@ -2817,11 +2843,13 @@ server <- function(input, output, session) {
             results_data <- power_df
           } else {
             # search minimal N achieving target power
-            cat(sprintf("Repeated method: searching required N for target power %.3f with R=%d.\n", target_power_input, R))
+            cat(sprintf("Repeated method (%s): searching required N for target power %.3f with R=%d.\n", input$model_selection, target_power_input, R))
             power_df <- repeated_power_from_pilot(
               pilot_data_clean, resolved_time_var, resolved_status_var, resolved_arm_var,
               n_per_arm_vec = grid, L = input$L, alpha = input$alpha, R = R,
-              strata_var = if ("stratum" %in% names(analysis_data)) resolved_strata_var else NULL,
+              model = input$model_selection,
+              strata_var = repeated_strata_var,
+              linear_terms = repeated_linear_terms,
               seed = reps_seed,
               point_cb = point_cb
             )
@@ -2985,9 +3013,6 @@ server <- function(input, output, session) {
             results_plot    <- mul$results_plot
             results_data    <- mul$results_data
             results_summary <- mul$results_summary
-            
-          } else if (input$model_selection == "Semiparametric (GAM) Model") {
-            stop("Analytical calculation is not implemented for Semiparametric (GAM) Model. Please use the Repeated method.", call. = FALSE)
             
           } else {
             stop(paste("Unsupported model selection:", input$model_selection), call. = FALSE)

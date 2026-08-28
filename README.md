@@ -48,16 +48,18 @@ Design note: `app.R` intentionally keeps orchestration in one file and delegates
 
 ### Method families
 
-- `R/linear_ipcw_analytical_app.R` and `R/linear_ipcw_boot_app.R`
-  - linear IPCW analytical and bootstrap power/sample-size functions.
-- `R/additive_stratified_analytical_app.R` and `R/additive_gam_boot_app.R`
-  - additive stratified analytical functions and additive GAM/bootstrap simulation runners.
-- `R/multiplicative_stratified_analytical_app.R` and `R/multiplicative_stratified_boot_app.R`
-  - multiplicative stratified analytical and bootstrap method implementations.
+- `R/linear_ipcw_analytical_app.R`
+  - linear IPCW analytical power/sample-size functions.
+- `R/additive_stratified_analytical_app.R`
+  - additive stratified analytical functions.
+- `R/multiplicative_stratified_analytical_app.R`
+  - multiplicative stratified analytical method implementations.
 - `R/dependent_censoring_analytical_app.R`
   - dependent-censoring analytical estimation and power/sample-size functions.
-- `R/survival_diagnostics_app.R`
-  - diagnostics runner used by orchestration and reporting.
+
+The Repeated calculation method resamples the pilot data inside `app.R`
+(`repeated_power_from_pilot`) and reuses the `.estimate_*_params` helpers of
+the selected model, so both methods share one estimator per model.
 
 ### Simulation and recipe infrastructure
 
@@ -72,16 +74,16 @@ Design note: `app.R` intentionally keeps orchestration in one file and delegates
 
 Exports (from `NAMESPACE`) are grouped as:
 
-- Analytical/Bootstrap power and sample-size methods:
-  - `linear.power.*`, `linear.ss.*`
-  - `additive.power.*`, `additive.ss.*`
-  - `MS.power.*`, `MS.ss.*`
-  - `DC.power.*`, `DC.ss.*`
+- Analytical power and sample-size methods:
+  - `linear.power.analytical.app`, `linear.ss.analytical.app`
+  - `additive.power.analytical.app`, `additive.ss.analytical.app`
+  - `MS.power.analytical.app`, `MS.ss.analytical.app`
+  - `DC.power.analytical.app`, `DC.ss.analytical.app`
 - Simulation and recipe APIs:
   - `simulate_from_recipe`, `validate_recipe`, `recipe_quick_aft`, `recipe_grid`
   - `generate_recipe_sets`, `load_recipe_sets`, `rebuild_manifest`
-- Internal estimators/runners exposed for package-level composition:
-  - `.estimate_*`, `.get_*_simulation_runner`, `.run_survival_diagnostics`
+- Internal estimators exposed for package-level composition:
+  - `.estimate_*_params`
 
 -----
 
@@ -101,8 +103,8 @@ Exports (from `NAMESPACE`) are grouped as:
 4. Engine invocation:
 - `app.R` dispatches to `R/` modules:
   - simulation path: `simulate_from_recipe(...)`
-  - method paths: `*_power_*` and `*_ss_*` functions across linear/additive/multiplicative/dependent-censoring families
-  - diagnostics path: `.run_survival_diagnostics(...)`
+  - method paths: `*.power.analytical.app` / `*.ss.analytical.app` functions across linear/additive/multiplicative/dependent-censoring families, and the model-aware `repeated_power_from_pilot` resampling method
+  - diagnostics path: inline log-rank/KM summary in `app.R`
 
 5. Result materialization:
 - tabular summaries, figures, diagnostics objects, and downloadable report payloads are created.

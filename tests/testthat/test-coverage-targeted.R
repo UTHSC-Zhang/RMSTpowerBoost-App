@@ -105,19 +105,6 @@ test_that("load_recipe_sets and rebuild_manifest cover path-selection and failur
   expect_error(rebuild_manifest(rec, list(), out_dir = empty_dir), "no files matched")
 })
 
-test_that("survival diagnostics covers one-arm and stratified paths", {
-  dat <- mk_pilot(40)
-  dat_one_arm <- dat
-  dat_one_arm$arm <- 1L
-  d1 <- .run_survival_diagnostics(dat_one_arm, "time", "status", "arm", alpha = 0.05)
-  expect_true(is.list(d1))
-  expect_true("logrank_summary" %in% names(d1))
-
-  d2 <- .run_survival_diagnostics(dat, "time", "status", "arm", strata_var = "strata", alpha = 0.1)
-  expect_true(is.list(d2))
-  expect_s3_class(d2$km_plot, "ggplot")
-})
-
 test_that("analytical stratified models cover error/warning branches", {
   dat <- mk_pilot(80)
 
@@ -155,37 +142,6 @@ test_that("analytical stratified models cover error/warning branches", {
                          target_power = 0.9999, linear_terms = "x1", L = 2,
                          n_start = 4, n_step = 2, max_n_per_arm = 6),
     "not achieved by max N"
-  )
-})
-
-test_that("boot model validations and failure paths are covered", {
-  dat <- mk_pilot(50)
-
-  expect_error(
-    linear.power.boot.app(dat, "time", "status", "arm", sample_sizes = NULL, linear_terms = "x1", L = 2, n_sim = 2, alpha = 0.1, parallel.cores = 1),
-    "sample_sizes"
-  )
-  expect_error(
-    linear.ss.boot.app(dat, "time", "status", "arm", target_power = NULL, linear_terms = "x1", L = 2, n_sim = 2, alpha = 0.1, parallel.cores = 1),
-    "target_power"
-  )
-
-  expect_error(
-    additive.power.boot.app(dat, "time", "status", "arm", sample_sizes = NULL, linear_terms = "x1", L = 2, n_sim = 2, alpha = 0.1, parallel.cores = 1),
-    "sample_sizes"
-  )
-  expect_error(
-    additive.ss.boot.app(dat, "time", "status", "arm", target_power = NULL, linear_terms = "x1", L = 2, n_sim = 2, alpha = 0.1, parallel.cores = 1),
-    "target_power"
-  )
-
-  expect_error(
-    MS.power.boot.app(dat, "time", "status", "arm", "strata", sample_sizes = NULL, linear_terms = "x1", L = 2, n_sim = 2, alpha = 0.1, parallel.cores = 1),
-    "sample_sizes"
-  )
-  expect_error(
-    MS.ss.boot.app(dat, "time", "status", "arm", "strata", target_power = c(0.8, 0.9), linear_terms = "x1", L = 2, n_sim = 2, alpha = 0.1, parallel.cores = 1),
-    "single numeric value"
   )
 })
 
@@ -236,60 +192,6 @@ test_that("recipe_sim internal branches move closer to full coverage", {
   expect_error(simulate_from_recipe("bad"), "`recipe` must be a list")
 })
 
-test_that("bootstrap wrappers hit summary/success branches via mocked runners", {
-  dat <- mk_pilot(40)
-
-  # Linear IPCW bootstrap wrappers
-  testthat::local_mocked_bindings(
-    .get_linear_ipcw_simulation_runner = function(...) {
-      function(n_per_arm) {
-        list(
-          power = if (n_per_arm >= 20) 0.9 else 0.1,
-          estimates = c(0.2, 0.3, 0.4),
-          std_errors = c(0.05, 0.06, 0.07)
-        )
-      }
-    }
-  )
-  lp <- linear.power.boot.app(dat, "time", "status", "arm", sample_sizes = c(10, 20), linear_terms = "x1", L = 2, n_sim = 2, alpha = 0.1, parallel.cores = 1)
-  expect_false(is.null(lp$results_summary))
-  ls <- linear.ss.boot.app(dat, "time", "status", "arm", target_power = 0.8, linear_terms = "x1", L = 2, n_sim = 2, alpha = 0.1, patience = 1, n_start = 10, n_step = 10, max_n_per_arm = 30, parallel.cores = 1)
-  expect_false(is.null(ls$results_summary))
-  expect_equal(ls$results_data$Required_N_per_Arm, 20)
-})
-
-test_that("GAM and multiplicative bootstrap wrappers cover parallel and summary branches", {
-  dat <- mk_pilot(50)
-
-  testthat::local_mocked_bindings(
-    .get_gam_simulation_runner = function(...) {
-      function(n_per_group) {
-        list(
-          power = if (n_per_group >= 8) 0.85 else 0.2,
-          estimates = c(0.1, 0.2, 0.25),
-          std_errors = c(0.03, 0.04, 0.05)
-        )
-      }
-    }
-  )
-  gp <- additive.power.boot.app(dat, "time", "status", "arm", strata_var = NULL, sample_sizes = c(6, 8), linear_terms = "x1", smooth_terms = NULL, L = 2, n_sim = 2, alpha = 0.1, parallel.cores = 2)
-  expect_false(is.null(gp$results_summary))
-  gs <- additive.ss.boot.app(dat, "time", "status", "arm", strata_var = NULL, target_power = 0.8, linear_terms = "x1", smooth_terms = NULL, L = 2, n_sim = 2, alpha = 0.1, parallel.cores = 2, patience = 1, n_start = 6, n_step = 2, max_n_per_arm = 10)
-  expect_false(is.null(gs$results_summary))
-
-  testthat::local_mocked_bindings(
-    .get_internal_simulation_runner = function(...) {
-      function(n_per_stratum) {
-        list(power = if (n_per_stratum >= 8) 0.9 else 0.1, estimates = c(1.1, 1.2, 1.3))
-      }
-    }
-  )
-  mp <- MS.power.boot.app(dat, "time", "status", "arm", "strata", sample_sizes = c(6, 8), linear_terms = "x1", L = 2, n_sim = 2, alpha = 0.1, parallel.cores = 2)
-  expect_false(is.null(mp$results_summary))
-  ms <- MS.ss.boot.app(dat, "time", "status", "arm", "strata", target_power = 0.8, linear_terms = "x1", L = 2, n_sim = 2, alpha = 0.1, parallel.cores = 2, patience = 1, n_start = 6, n_step = 2, max_n_per_arm = 10)
-  expect_false(is.null(ms$results_summary))
-})
-
 test_that("multiplicative analytical callbacks and low-data guard are covered", {
   dat <- mk_pilot(60)
   cb_hits <- 0L
@@ -313,54 +215,3 @@ test_that("multiplicative analytical callbacks and low-data guard are covered", 
   )
 })
 
-test_that("multiplicative stratified bootstrap internal edge branches are covered", {
-  dat <- mk_pilot(30)
-
-  # Trigger empty cleaned data path (boot_data NULL/0 rows)
-  dat_empty <- dat
-  dat_empty$time <- NA_real_
-  sim_empty <- .get_internal_simulation_runner(
-    pilot_data = dat_empty,
-    time_var = "time", status_var = "status", arm_var = "arm", strata_var = "strata",
-    linear_terms = "x1", L = 2, alpha = 0.1, n_sim = 2, parallel.cores = 1
-  )
-  out_empty <- sim_empty(3)
-  expect_true(is.list(out_empty))
-
-  # Trigger parallel branch in internal runner
-  sim_parallel <- .get_internal_simulation_runner(
-    pilot_data = dat,
-    time_var = "time", status_var = "status", arm_var = "arm", strata_var = "strata",
-    linear_terms = "x1", L = 2, alpha = 0.1, n_sim = 2, parallel.cores = 2
-  )
-  out_parallel <- sim_parallel(4)
-  expect_true(is.list(out_parallel))
-})
-
-test_that("multiplicative stratified bootstrap wrappers cover no-summary and stagnation/max paths", {
-  dat <- mk_pilot(40)
-
-  # Force no valid estimates summary branch in power wrapper
-  testthat::local_mocked_bindings(
-    .get_internal_simulation_runner = function(...) {
-      function(n_per_stratum) {
-        list(power = 0.1, estimates = numeric(0))
-      }
-    }
-  )
-  p_none <- MS.power.boot.app(dat, "time", "status", "arm", "strata", sample_sizes = c(4, 6), linear_terms = "x1", L = 2, n_sim = 2, alpha = 0.1, parallel.cores = 1)
-  expect_true(is.null(p_none$results_summary))
-
-  # Force stagnation path
-  s_stag <- suppressWarnings(
-    MS.ss.boot.app(dat, "time", "status", "arm", "strata", target_power = 0.9, linear_terms = "x1", L = 2, n_sim = 2, alpha = 0.1, parallel.cores = 1, patience = 1, n_start = 4, n_step = 2, max_n_per_arm = 10)
-  )
-  expect_true(nrow(s_stag$results_data) == 1)
-  expect_true(is.null(s_stag$results_summary))
-
-  # Force max-N path without stagnation break
-  s_max <- suppressWarnings(
-    MS.ss.boot.app(dat, "time", "status", "arm", "strata", target_power = 0.9, linear_terms = "x1", L = 2, n_sim = 2, alpha = 0.1, parallel.cores = 1, patience = 99, n_start = 4, n_step = 2, max_n_per_arm = 6)
-  )
-  expect_true(nrow(s_max$results_data) == 1)
-})
