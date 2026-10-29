@@ -2,7 +2,7 @@
 % Please edit documentation in R/linear_ipcw_analytical_app.R
 \name{.estimate_linear_ipcw_params}
 \alias{.estimate_linear_ipcw_params}
-\title{Linear IPCW RMST Model Power and Sample Size Calculation (Analytic)}
+\title{Estimate the Linear IPCW RMST Model from Pilot Data}
 \usage{
 .estimate_linear_ipcw_params(
   pilot_data,
@@ -13,7 +13,21 @@
   L
 )
 }
+\value{
+A list with \code{beta_effect}, \code{se_beta_n1} (sandwich, n = 1
+  scale), \code{se_beta_model_n1} (model-based weighted-least-squares, n = 1
+  scale), \code{n_pilot}, the weighted fit \code{fit_lm} (also as
+  \code{fit_wls}) and \code{arm_term}, the treatment row of its coefficient
+  table.
+}
 \description{
-An internal function for the Shiny app.
+Internal helper shared by the analytical functions and the app's
+  Repeated method, ported from RMSTpowerBoost. The censoring survival comes
+  from a Cox model for censoring with treatment and \code{linear_terms} as
+  predictors and Breslow ties, fitted on the original follow-up and evaluated
+  at each subject's truncated outcome. The IPCW weights are used as fitted,
+  without capping. The treatment effect is estimated by weighted least
+  squares and its variance by the simplified sandwich of Zhang & Schaubel
+  (2024), Eqs. (11)-(12), treating the weights as fixed.
 }
 \keyword{internal}

@@ -14,13 +14,22 @@ MS.power.analytical.app(
   linear_terms = NULL,
   L,
   alpha = 0.05,
-  point_cb = NULL
+  point_cb = NULL,
+  test = c("sandwich", "wls")
 )
 }
 \arguments{
 \item{sample_sizes}{A numeric vector of sample sizes *per stratum* to calculate power for.}
 
 \item{alpha}{The significance level (Type I error rate).}
+
+\item{point_cb}{Optional callback \code{function(n, power)} for live plotting.}
+
+\item{test}{Which test the reported power refers to. \code{"sandwich"}
+(default) is the robust sandwich Wald test of Wang et al. (2019).
+\code{"wls"} is the weighted-least-squares t-test, with the sampling
+distribution from the sandwich and the rejection threshold from the
+model-based WLS standard error.}
 }
 \value{
 A list containing results.

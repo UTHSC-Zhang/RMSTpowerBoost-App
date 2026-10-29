@@ -1,91 +1,80 @@
-
-#' @title Linear IPCW RMST Model Power and Sample Size Calculation (Analytic)
-#' @description An internal function for the Shiny app.
+#' @title Estimate the Linear IPCW RMST Model from Pilot Data
+#' @description Internal helper shared by the analytical functions and the app's
+#'   Repeated method, ported from RMSTpowerBoost. The censoring survival comes
+#'   from a Cox model for censoring with treatment and \code{linear_terms} as
+#'   predictors and Breslow ties, fitted on the original follow-up and evaluated
+#'   at each subject's truncated outcome. The IPCW weights are used as fitted,
+#'   without capping. The treatment effect is estimated by weighted least
+#'   squares and its variance by the simplified sandwich of Zhang & Schaubel
+#'   (2024), Eqs. (11)-(12), treating the weights as fixed.
+#' @return A list with \code{beta_effect}, \code{se_beta_n1} (sandwich, n = 1
+#'   scale), \code{se_beta_model_n1} (model-based weighted-least-squares, n = 1
+#'   scale), \code{n_pilot}, the weighted fit \code{fit_lm} (also as
+#'   \code{fit_wls}) and \code{arm_term}, the treatment row of its coefficient
+#'   table.
 #' @keywords internal
 #' @export
 .estimate_linear_ipcw_params <- function(pilot_data, time_var, status_var, arm_var, linear_terms, L) {
-  
+
   cat("--- Estimating parameters from pilot data for analytic calculation... ---\n")
-  
+
   core_vars <- c(time_var, status_var, arm_var)
   all_vars <- c(core_vars, linear_terms)
-  df <- pilot_data[stats::complete.cases(pilot_data[, all_vars]), ]
+  df <- .rmst_prepare_df(pilot_data, all_vars, time_var, status_var, L)
   n_pilot <- nrow(df)
-  
-  # Define model formulas
+
   factor_arm_str <- paste0("factor(", arm_var, ")")
   model_rhs <- paste(c(factor_arm_str, linear_terms), collapse = " + ")
   model_formula <- stats::as.formula(paste("Y_rmst ~", model_rhs))
   message("Model: Y_rmst ~ ", model_rhs)
-  
-  # Prepare data for IPCW
-  df$Y_rmst <- pmin(df[[time_var]], L)
-  df$is_censored <- df[[status_var]] == 0
-  df$is_event <- df[[status_var]] == 1
-  df$is_complete <- df$is_event | df[[time_var]] >= L
-  
-  # Fit censoring model (Kaplan-Meier for G(t))
-  cens_formula <- stats::as.formula(paste0("survival::Surv(", time_var, ", is_censored) ~ 1"))
-  cens_fit <- survival::survfit(cens_formula, data = df)
-  cens_surv_prob <- stats::stepfun(cens_fit$time, c(1, cens_fit$surv))(df$Y_rmst)
-  df$weights <- df$is_complete / cens_surv_prob
-  
-  # Stabilize weights
-  finite_weights <- df$weights[is.finite(df$weights) & df$weights > 0]
-  if (length(finite_weights) > 0) {
-    weight_cap <- stats::quantile(finite_weights, probs = 0.99, na.rm = TRUE)
-    df$weights[df$weights > weight_cap] <- weight_cap
-  }
-  df$weights[!is.finite(df$weights)] <- 0
-  
-  # Filter for model fitting
+
+  df$weights <- .linear_cox_weights(df, time_var, status_var, arm_var, linear_terms, L)
+
   fit_data <- df[df$weights > 0, ]
   fit_weights <- fit_data$weights
-  
   if (length(unique(fit_data[[arm_var]])) < 2) {
     stop("Pilot data contains events in only one arm after filtering.", call. = FALSE)
   }
-  
-  # Fit the primary linear model
+
   fit_lm <- stats::lm(model_formula, data = fit_data, weights = fit_weights)
   beta_hat <- stats::coef(fit_lm)
-  
   arm_pattern <- paste0("^factor\\(", arm_var, "\\)1$")
   arm_coeff_name <- names(beta_hat)[grep(arm_pattern, names(beta_hat))]
   if (length(arm_coeff_name) == 0) stop("Could not find treatment effect coefficient.")
   beta_effect <- beta_hat[arm_coeff_name]
-  
-  # --- Calculate Asymptotic Sandwich Variance Components ---
+
+  # Simplified sandwich A^-1 B A^-1 with the IPCW weights treated as fixed:
+  # A_n = X'WX / n, B_n = sum_i (x_i w_i r_i)^{ox2} / n.
   cat("--- Calculating asymptotic variance... ---\n")
   X <- stats::model.matrix(model_formula, data = df)
-  
   A_hat <- crossprod(X * sqrt(df$weights), X * sqrt(df$weights)) / n_pilot
-  
   A_hat_inv <- tryCatch({
     solve(A_hat)
   }, error = function(e) {
     stop("The design matrix (A_hat) is singular. This can happen with small pilot datasets or perfect separation.", call. = FALSE)
   })
-  
+
   df$predicted_rmst <- stats::predict(fit_lm, newdata = df)
   residuals <- df$Y_rmst - df$predicted_rmst
-  
   epsilon <- X * residuals * df$weights
   epsilon[is.na(epsilon)] <- 0
   B_hat <- crossprod(epsilon) / n_pilot
-  
+
   V_hat_n <- A_hat_inv %*% B_hat %*% t(A_hat_inv)
-  
-  # Scale to get the variance for n=1
-  var_beta_n1 <- V_hat_n[arm_coeff_name, arm_coeff_name]
-  se_beta_n1 <- sqrt(var_beta_n1)
-  
-  # Return a list containing the key estimated parameters
-  return(list(
+  # Model-based weighted-least-squares variance, sigma^2 A^{-1}, on the same
+  # n = 1 scale: what summary(fit_lm) reports and what the WLS t-test uses for
+  # its rejection threshold.
+  V_model_n <- summary(fit_lm)$sigma^2 * A_hat_inv
+
+  list(
     beta_effect = beta_effect,
-    se_beta_n1 = se_beta_n1,
-    fit_lm = fit_lm
-  ))
+    se_beta_n1 = sqrt(V_hat_n[arm_coeff_name, arm_coeff_name]),
+    se_beta_model_n1 = sqrt(V_model_n[arm_coeff_name, arm_coeff_name]),
+    n_pilot = n_pilot,
+    fit_lm = fit_lm,
+    fit_wls = fit_lm,
+    arm_term = arm_coeff_name
+  )
 }
 
 
@@ -97,55 +86,47 @@
 #' @inheritParams .estimate_linear_ipcw_params
 #' @param sample_sizes A numeric vector of sample sizes *per arm* to calculate power for.
 #' @param alpha The significance level for the power calculation (Type I error rate).
+#' @param point_cb Optional callback \code{function(n, power)} for live plotting.
+#' @param test Which test the reported power refers to. \code{"wls"} (default) is
+#'   the weighted-least-squares t-test that \code{lm(..., weights = w)} reports,
+#'   with the sampling distribution from the sandwich variance and the rejection
+#'   threshold from the model-based WLS standard error. \code{"sandwich"} is the
+#'   robust sandwich Wald test.
 #' @return A `list` containing results.
 #' @keywords internal
 #' @export
 linear.power.analytical.app <- function(pilot_data, time_var, status_var, arm_var,
                                     sample_sizes, linear_terms = NULL, L, alpha = 0.05,
-                                    point_cb = NULL) {
-  
+                                    point_cb = NULL, test = c("wls", "sandwich")) {
+  test <- match.arg(test)
+
   # 1. Estimate nuisance parameters from pilot data using the helper function
   params <- .estimate_linear_ipcw_params(pilot_data, time_var, status_var, arm_var, linear_terms, L)
-  
+
   # 2. Calculate Power for Each Sample Size
   cat("--- Calculating power for specified sample sizes... ---\n")
-  z_alpha <- stats::qnorm(1 - alpha / 2)
-  power_values <- sapply(sample_sizes, function(n_per_arm) {
-    total_n <- n_per_arm * 2
-    se_final <- params$se_beta_n1 / sqrt(total_n)
-    power <- stats::pnorm( (abs(params$beta_effect) / se_final) - z_alpha )
-    if (is.function(point_cb)) {
-      try(point_cb(n_per_arm, power), silent = TRUE)
-    }
-    return(power)
-  })
-  
+  power_values <- .rmst_app_power_values(
+    params, sample_sizes, 2, alpha,
+    se_test_n1 = if (test == "wls") params$se_beta_model_n1 else NULL,
+    point_cb = point_cb
+  )
   results_df <- data.frame(N_per_Arm = sample_sizes, Power = power_values)
-  
+
   # 3. Create Summary and Plot
   results_summary <- data.frame(
     Statistic = "Assumed RMST Difference (from pilot)",
     Value = params$beta_effect
   )
-  
-  p <- ggplot2::ggplot(results_df, ggplot2::aes(x = N_per_Arm, y = Power)) +
-    ggplot2::geom_line(color = "#D55E00", linewidth = 1) +
-    ggplot2::geom_point(color = "#D55E00", size = 3) +
-    ggplot2::geom_text(
-      ggplot2::aes(label = sprintf("N=%s\nP=%.3f", N_per_Arm, Power)),
-      vjust = -0.6, size = 3, color = "#D55E00", check_overlap = TRUE
-    ) +
-    ggplot2::scale_y_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0.02, 0.12))) +
-    ggplot2::coord_cartesian(ylim = c(0, 1.05), clip = "off") +
-    ggplot2::labs(
-      title = "Analytic Power Curve: Linear IPCW RMST Model",
-      subtitle = "Based on the asymptotic variance from Tian et al. (2014).",
-      x = "Sample Size Per Arm", y = "Estimated Power"
-    ) +
-    ggplot2::theme_minimal() +
-    ggplot2::theme(plot.margin = ggplot2::margin(10, 20, 10, 10))
-  
-  return(list(results_data = results_df, results_plot = p, results_summary = results_summary))
+  p <- .rmst_app_power_plot(
+    results_df, "N_per_Arm", "#D55E00",
+    title = "Analytic Power Curve: Linear IPCW RMST Model",
+    subtitle = if (test == "wls")
+      "Weighted least-squares t-test; sandwich sampling variance (Tian et al. 2014)."
+    else "Sandwich Wald test; asymptotic variance from Tian et al. (2014).",
+    xlab = "Sample Size Per Arm"
+  )
+
+  list(results_data = results_df, results_plot = p, results_summary = results_summary)
 }
 
 # Sample Size Search ------------------------------------------------------
@@ -153,8 +134,8 @@ linear.power.analytical.app <- function(pilot_data, time_var, status_var, arm_va
 #' @description Calculates the required sample size for a target power using an
 #'   analytic formula based on the methods of Tian et al. (2014).
 #' @inheritParams .estimate_linear_ipcw_params
+#' @inheritParams linear.power.analytical.app
 #' @param target_power A single numeric value for the desired power (e.g., 0.80 or 0.90).
-#' @param alpha The significance level (Type I error rate).
 #' @param n_start The starting sample size *per arm* for the search.
 #' @param n_step The increment in sample size at each step of the search.
 #' @param max_n_per_arm The maximum sample size *per arm* to search up to.
@@ -164,70 +145,41 @@ linear.power.analytical.app <- function(pilot_data, time_var, status_var, arm_va
 linear.ss.analytical.app <- function(pilot_data, time_var, status_var, arm_var,
                                  target_power, linear_terms = NULL, L, alpha = 0.05,
                                  n_start = 50, n_step = 25, max_n_per_arm = 2000,
-                                 point_cb = NULL) {
-  
+                                 point_cb = NULL, test = c("wls", "sandwich")) {
+  test <- match.arg(test)
+
   # 1. Estimate parameters from pilot data using the helper function
   params <- .estimate_linear_ipcw_params(pilot_data, time_var, status_var, arm_var, linear_terms, L)
-  
+
   # 2. Iterative Search for Sample Size using Analytic Formula
   cat("--- Searching for Sample Size (Method: Analytic) ---\n")
-  current_n <- n_start
-  search_path <- list()
-  final_n <- NA_integer_
-  z_alpha <- stats::qnorm(1 - alpha / 2)
-  
-  while (current_n <= max_n_per_arm) {
-    total_n <- current_n * 2
-    se_final <- params$se_beta_n1 / sqrt(total_n)
-    calculated_power <- stats::pnorm((abs(params$beta_effect) / se_final) - z_alpha)
-    if (!is.finite(calculated_power)) calculated_power <- 0
-    
-    search_path[[as.character(current_n)]] <- calculated_power
-    if (is.function(point_cb)) {
-      try(point_cb(current_n, calculated_power), silent = TRUE)
-    }
-    cat(paste0("  N = ", current_n, "/arm, Calculated Power = ", round(calculated_power, 3), "\n"))
-    
-    if (calculated_power >= target_power) {
-      final_n <- current_n
-      break
-    }
-    current_n <- current_n + n_step
-  }
-  
-  if (is.na(final_n)) {
-    warning(paste("Target power", target_power, "not achieved by max N of", max_n_per_arm), call. = FALSE)
-    final_n <- max_n_per_arm
-  }
-  
+  search <- .rmst_app_ss_search(
+    params, 2, target_power, alpha, n_start, n_step, max_n_per_arm, "/arm",
+    se_test_n1 = if (test == "wls") params$se_beta_model_n1 else NULL,
+    point_cb = point_cb
+  )
+  final_n <- search$final_n
+
   # 3. Finalize and Return Results
   results_summary <- data.frame(
     Statistic = "Assumed RMST Difference (from pilot)",
     Value = params$beta_effect
   )
   results_df <- data.frame(Target_Power = target_power, Required_N_per_Arm = final_n)
-  search_path_df <- data.frame(N_per_Arm = as.integer(names(search_path)), Power = unlist(search_path))
-  
-  p <- ggplot2::ggplot(stats::na.omit(search_path_df), ggplot2::aes(x = N_per_Arm, y = Power)) +
-    ggplot2::geom_line(color = "#009E73", linewidth = 1) +
-    ggplot2::geom_point(color = "#009E73", size = 3) +
-    ggplot2::geom_text(
-      ggplot2::aes(label = sprintf("N=%s\nP=%.3f", N_per_Arm, Power)),
-      vjust = -0.6, size = 3, color = "#009E73", check_overlap = TRUE
-    ) +
-    ggplot2::geom_hline(yintercept = target_power, linetype = "dashed", color = "red") +
-    ggplot2::geom_vline(xintercept = final_n, linetype = "dotted", color = "blue") +
-    ggplot2::scale_y_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0.02, 0.12))) +
-    ggplot2::coord_cartesian(ylim = c(0, 1.05), clip = "off") +
-    ggplot2::labs(
-      title = "Analytic Sample Size Search: Linear IPCW RMST Model",
-      subtitle = "Power calculated from formula at each step.",
-      x = "Sample Size Per Arm", y = "Calculated Power"
-    ) + ggplot2::theme_minimal() +
-    ggplot2::theme(plot.margin = ggplot2::margin(10, 20, 10, 10))
-  
+  search_path_df <- search$search_path_df
+  names(search_path_df) <- c("N_per_Arm", "Power")
+
+  p <- .rmst_app_ss_plot(
+    search_path_df, "N_per_Arm", final_n, target_power,
+    title = "Analytic Sample Size Search: Linear IPCW RMST Model",
+    subtitle = if (test == "wls")
+      "Weighted least-squares t-test; power from formula at each step."
+    else "Sandwich Wald test; power from formula at each step.",
+    xlab = "Sample Size Per Arm"
+  )
+
   cat("\n--- Calculation Summary ---\n")
   print(knitr::kable(results_df, caption = "Required Sample Size"))
-  
-  return(list(results_data = results_df, results_plot = p, results_summary = results_summary))
+
+  list(results_data = results_df, results_plot = p, results_summary = results_summary)
 }

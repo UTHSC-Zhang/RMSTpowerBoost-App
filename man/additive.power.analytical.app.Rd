@@ -21,11 +21,14 @@ additive.power.analytical.app(
 \item{sample_sizes}{A numeric vector of sample sizes *per stratum* to calculate power for.}
 
 \item{alpha}{The significance level (Type I error rate).}
+
+\item{point_cb}{Optional callback \code{function(n, power)} for live plotting.}
 }
 \value{
 A list containing the results.
 }
 \description{
-Performs power analysis for a stratified, additive RMST model.
+Performs power analysis for a stratified, additive RMST model. The
+  power refers to the sandwich Wald test of the stratum-centered estimator.
 }
 \keyword{internal}

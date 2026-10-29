@@ -177,7 +177,8 @@ validate_recipe <- function(recipe) {
 #' }
 gen_covariates <- function(n, covariates) {
   defs <- covariates$defs %||% list()
-  if (!length(defs)) return(data.frame())
+  # Zero covariates still give one row per subject, so the result binds to n rows.
+  if (!length(defs)) return(data.frame(matrix(nrow = n, ncol = 0L)))
   out <- vector("list", length(defs))
   names(out) <- vapply(defs, function(d) d$name, character(1))
   for (i in seq_along(defs)) {
@@ -339,6 +340,12 @@ gen_covariates <- function(n, covariates) {
       u <- stats::runif(n)
       return( lam * (-log(u) / exp(eta))^(1/k) )
    }
+   if (model == "ph_gompertz") {
+      alpha <- baseline$rate    # baseline hazard level
+      gamma <- baseline$shape   # growth parameter (>0)
+      u <- stats::runif(n)
+      return( log(1 - log(u) * gamma / (alpha * exp(eta))) / gamma )
+   }
    if (model %in% c("ph_pwexp", "cox_pwexp")) {
       rates <- baseline$rates
       cuts  <- baseline$cuts %||% numeric(0)
@@ -350,16 +357,19 @@ gen_covariates <- function(n, covariates) {
 # ---------- Censoring ----------
 
 .achieved_cens_exp <- function(T_event, rate, admin_time = Inf) {
-  n <- length(T_event)
   admin <- if (is.null(admin_time) || !is.finite(admin_time)) Inf else admin_time
-  if (is.na(rate) || rate <= 0) {
-    C_rand <- rep(Inf, n)
-  } else {
-    C_rand <- stats::rexp(n, rate = rate)
-  }
-  C <- pmin(C_rand, admin)
-  status <- as.integer(T_event <= C)
-  mean(status == 0, na.rm = TRUE)
+  t <- as.numeric(T_event)
+  if (!length(t)) return(NA_real_)
+  if (is.na(rate) || rate <= 0) return(mean(t > admin, na.rm = TRUE))
+
+  # With fixed event times T_event and exponential censoring C ~ Exp(rate),
+  # P(censored | T_event = t) is deterministic:
+  #   if t <= admin: P(C < t) = 1 - exp(-rate * t)
+  #   if t > admin : censoring is guaranteed by the administrative cutoff.
+  # A deterministic target lets uniroot() solve for the rate without consuming
+  # random numbers or chasing Monte Carlo noise.
+  cens_prob <- ifelse(t <= admin, 1 - exp(-rate * t), 1)
+  mean(cens_prob, na.rm = TRUE)
 }
 
 .solve_rate_for_target <- function(T_event, target, admin_time = Inf, tol = 0.002) {

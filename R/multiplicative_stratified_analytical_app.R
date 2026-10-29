@@ -1,103 +1,77 @@
 #' @title Internal Helper to Estimate Multiplicative Stratified Model Parameters
 #' @description This internal function contains the common logic for estimating the
-#'   log-RMST ratio and its variance from pilot data using a log-linear approximation.
-#' @return A list containing `beta_effect`, `se_beta_n1`, and `n_strata`.
+#'   log-RMST ratio and its variance from pilot data using a log-linear working
+#'   model (Wang et al. 2019), ported from RMSTpowerBoost. Censoring weights come
+#'   from a Cox model for censoring with treatment and \code{linear_terms} as
+#'   predictors and the stratum as a Cox stratum, and are used as fitted, without
+#'   capping. The working model is fitted by weighted least squares and its
+#'   variance is the robust sandwich of the estimating equations.
+#' @return A list containing `beta_effect`, `se_beta_n1` (sandwich, n = 1 scale),
+#'   `se_beta_model_n1` (model-based weighted-least-squares, n = 1 scale),
+#'   `n_pilot`, `n_strata`, the weighted fit `fit_wls` and `arm_term`.
 #' @keywords internal
 #' @export
 .estimate_multiplicative_stratified_params <- function(pilot_data, time_var, status_var, arm_var, strata_var, linear_terms, L) {
-  
+
   # --- 1. Estimate Parameters from Pilot Data (log-linear approximation) ---
   cat("--- Estimating parameters from pilot data (log-linear approximation)... ---\n")
-  
-  core_vars <- c(time_var, status_var, arm_var, strata_var)
+
   covariates <- c(arm_var, linear_terms)
-  all_vars <- c(core_vars, linear_terms)
-  df <- pilot_data[stats::complete.cases(pilot_data[, all_vars]), ]
+  all_vars <- c(time_var, status_var, arm_var, strata_var, linear_terms)
+  df <- .rmst_prepare_df(pilot_data, all_vars, time_var, status_var, L)
   n_pilot <- nrow(df)
-  min_events_per_stratum <- 2 # Define a minimum threshold
-  event_counts <- stats::aggregate(stats::as.formula(paste(status_var, "~", strata_var)), 
-                            data = df, 
-                            FUN = sum)
-  
-  problem_strata <- event_counts[event_counts[[status_var]] < min_events_per_stratum, ]
-  
-  if (nrow(problem_strata) > 0) {
-    strata_names <- paste(problem_strata[[strata_var]], collapse = ", ")
-    error_msg <- paste(
-      "Insufficient events in one or more strata. Each stratum must have at least",
-      min_events_per_stratum, "events.",
-      "Problematic strata:", strata_names
-    )
-    stop(error_msg, call. = FALSE)
-  }
-  # Prepare data for IPCW
-  df$Y_rmst <- pmin(df[[time_var]], L)
-  df$is_event <- df[[status_var]] == 1
-  df$is_complete <- df$is_event | df[[time_var]] >= L
-  
-  # Model for censoring (stratified by strata_var)
-  cens_formula <- stats::as.formula(paste0("survival::Surv(", time_var, ", ", status_var, " == 0) ~ ",
-                                           paste(covariates, collapse = " + "),
-                                           " + strata(", strata_var, ")"))
-  fit_cens <- survival::coxph(cens_formula, data = df, ties = "breslow")
-  
-  # Calculate IPCW weights
-  bh_cens <- survival::basehaz(fit_cens, centered = FALSE)
-  df$H_cens <- 0
-  # basehaz() labels strata either as "level" or "strata_var=level" depending
-  # on the survival package version; accept both and fail loudly if neither
-  # matches, since silently missing strata would zero out the censoring hazard
-  bh_labels <- if (is.null(bh_cens$strata)) NULL else as.character(bh_cens$strata)
-  for(st in unique(df[[strata_var]])){
-    is_stratum <- df[[strata_var]] == st
-    is_bh_stratum <- if (is.null(bh_labels)) rep(TRUE, nrow(bh_cens)) else
-      bh_labels == as.character(st) | bh_labels == paste0(strata_var, "=", st)
-    if (sum(is_bh_stratum) == 0) {
-      stop("Could not locate the baseline censoring hazard for stratum '", st,
-           "'; IPCW weights cannot be computed.", call. = FALSE)
-    }
-    H_st <- stats::stepfun(bh_cens$time[is_bh_stratum], c(0, bh_cens$hazard[is_bh_stratum]))(df$Y_rmst[is_stratum])
-    df$H_cens[is_stratum] <- H_st
-  }
-  df$weights <- exp(df$H_cens * exp(stats::predict(fit_cens, newdata = df, type="lp", reference="zero")))
-  
-  # Stabilize weights
-  finite_weights <- df$weights[is.finite(df$weights)]
-  if (length(finite_weights) > 0) {
-    weight_cap <- stats::quantile(finite_weights, probs = 0.99, na.rm = TRUE)
-    df$weights[df$weights > weight_cap] <- weight_cap
-  }
-  df$weights[!is.finite(df$weights)] <- 0
-  df$w_delta <- df$weights * df$is_complete
-  df$w_delta[is.na(df$w_delta)] <- 0
-  
-  # Use a log-linear model as a practical approximation to the multiplicative model
-  fit_data <- df[df$w_delta > 0 & df$Y_rmst > 0, ]
-  fit_weights <- fit_data$w_delta
-  
-  log_model_formula <- stats::as.formula(paste("log(Y_rmst) ~", paste(c(covariates, strata_var), collapse=" + ")))
+
+  # App-side input check, reported before any model is fitted.
+  .check_events_per_stratum(df, status_var, strata_var)
+
+  # Already Delta_Y * W_hat, uncapped.
+  df$weights <- .ipcw_stratified_cox_weights(df, time_var, status_var,
+                                             covariates, strata_var)
+
+  # Log-linear working model fitted by weighted least squares
+  fit_data <- df[df$weights > 0 & df$Y_rmst > 0, ]
+  fit_weights <- fit_data$weights
+  log_model_formula <- stats::as.formula(
+    paste("log(Y_rmst) ~", paste(covariates, collapse = " + "), "+", strata_var))
   message("Approximation Model: ", deparse(log_model_formula))
-  
-  if(nrow(fit_data) < (length(covariates) + length(unique(fit_data[[strata_var]])))) {
+
+  if (nrow(fit_data) < (length(covariates) + length(unique(fit_data[[strata_var]])))) {
     stop("Not enough data points to fit the approximation model after filtering.", call. = FALSE)
   }
-  
   fit_log_lm <- stats::lm(log_model_formula, data = fit_data, weights = fit_weights)
-  
-  beta_summary <- stats::coef(summary(fit_log_lm))
-  beta_effect <- beta_summary[arm_var, "Estimate"]
-  
-  # --- 2. Calculate Asymptotic Variance from the approximate model ---
-  V_hat <- stats::vcov(fit_log_lm) * n_pilot # Scale to Var(sqrt(n)*beta)
-  var_beta_n1 <- V_hat[arm_var, arm_var]
-  se_beta_n1 <- sqrt(var_beta_n1)
-  
-  return(list(
+
+  beta_all <- stats::coef(fit_log_lm)
+  beta_effect <- beta_all[[arm_var]]
+
+  # --- 2. Robust sandwich variance A^-1 B A^-1 of the WLS estimating equations ---
+  # Columns with NA coefficients from a rank-deficient fit are dropped.
+  X <- stats::model.matrix(fit_log_lm)
+  ok <- !is.na(beta_all)
+  X <- X[, ok, drop = FALSE]
+  r <- stats::residuals(fit_log_lm)
+
+  A_hat <- crossprod(X * sqrt(fit_weights)) / n_pilot
+  A_hat_inv <- tryCatch({
+    solve(A_hat)
+  }, error = function(e) {
+    stop("The design matrix (A_hat) is singular and cannot be inverted. This may be caused by a lack of variation in the covariates within one or more strata.", call. = FALSE)
+  })
+  epsilon <- X * (fit_weights * r)
+  B_hat <- crossprod(epsilon) / n_pilot
+  V_hat_n <- A_hat_inv %*% B_hat %*% t(A_hat_inv)
+  # Model-based weighted-least-squares variance, sigma^2 A^{-1}, on the n = 1
+  # scale: what summary(fit_log_lm) reports and what the WLS t-test uses.
+  V_model_n <- summary(fit_log_lm)$sigma^2 * A_hat_inv
+
+  list(
     beta_effect = beta_effect,
-    se_beta_n1 = se_beta_n1,
+    se_beta_n1 = sqrt(V_hat_n[arm_var, arm_var]),
+    se_beta_model_n1 = sqrt(V_model_n[arm_var, arm_var]),
+    n_pilot = n_pilot,
     n_strata = length(unique(df[[strata_var]])),
-    fit_cens = fit_cens
-  ))
+    fit_wls = fit_log_lm,
+    arm_term = arm_var
+  )
 }
 
 
@@ -108,55 +82,48 @@
 #' @inheritParams .estimate_multiplicative_stratified_params
 #' @param sample_sizes A numeric vector of sample sizes *per stratum* to calculate power for.
 #' @param alpha The significance level (Type I error rate).
+#' @param point_cb Optional callback \code{function(n, power)} for live plotting.
+#' @param test Which test the reported power refers to. \code{"sandwich"}
+#'   (default) is the robust sandwich Wald test of Wang et al. (2019).
+#'   \code{"wls"} is the weighted-least-squares t-test, with the sampling
+#'   distribution from the sandwich and the rejection threshold from the
+#'   model-based WLS standard error.
 #' @return A list containing results.
 #' @keywords internal
 #' @export
 MS.power.analytical.app <- function(pilot_data, time_var, status_var, arm_var, strata_var,
                                 sample_sizes, linear_terms = NULL, L, alpha = 0.05,
-                                point_cb = NULL) {
-  
+                                point_cb = NULL, test = c("sandwich", "wls")) {
+  test <- match.arg(test)
+
   # 1. Estimate parameters from pilot data
   params <- .estimate_multiplicative_stratified_params(pilot_data, time_var, status_var, arm_var, strata_var, linear_terms, L)
-  
+
   # 2. Calculate Power
   cat("--- Calculating power for specified sample sizes... ---\n")
-  z_alpha <- stats::qnorm(1 - alpha / 2)
-  power_values <- sapply(sample_sizes, function(n_per_stratum) {
-    total_n <- n_per_stratum * params$n_strata
-    se_final <- params$se_beta_n1 / sqrt(total_n)
-    power <- stats::pnorm( (abs(params$beta_effect) / se_final) - z_alpha )
-    if (is.function(point_cb)) {
-      try(point_cb(n_per_stratum, power), silent = TRUE)
-    }
-    return(power)
-  })
-  
+  power_values <- .rmst_app_power_values(
+    params, sample_sizes, params$n_strata, alpha,
+    se_test_n1 = if (test == "wls") params$se_beta_model_n1 else NULL,
+    point_cb = point_cb
+  )
   results_df <- data.frame(N_per_Stratum = sample_sizes, Power = power_values)
-  
+
   # 3. Create Plot and Return
-  p <- ggplot2::ggplot(results_df, ggplot2::aes(x = N_per_Stratum, y = Power)) +
-    ggplot2::geom_line(color = "#E69F00", linewidth = 1) +
-    ggplot2::geom_point(color = "#E69F00", size = 3) +
-    ggplot2::geom_text(
-      ggplot2::aes(label = sprintf("N=%s\nP=%.3f", N_per_Stratum, Power)),
-      vjust = -0.6, size = 3, color = "#E69F00", check_overlap = TRUE
-    ) +
-    ggplot2::scale_y_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0.02, 0.12))) +
-    ggplot2::coord_cartesian(ylim = c(0, 1.05), clip = "off") +
-    ggplot2::labs(
-      title = "Analytic Power Curve: Multiplicative Stratified RMST Model",
-      subtitle = "Approximate method based on Wang et al. (2019).",
-      x = "Sample Size Per Stratum", y = "Estimated Power"
-    ) +
-    ggplot2::theme_minimal() +
-    ggplot2::theme(plot.margin = ggplot2::margin(10, 20, 10, 10))
-  
+  p <- .rmst_app_power_plot(
+    results_df, "N_per_Stratum", "#E69F00",
+    title = "Analytic Power Curve: Multiplicative Stratified RMST Model",
+    subtitle = if (test == "wls")
+      "Weighted least-squares t-test; sandwich sampling variance."
+    else "Log-linear approximation with robust sandwich variance (Wang et al. 2019).",
+    xlab = "Sample Size Per Stratum"
+  )
+
   results_summary <- data.frame(
     Statistic = "Assumed log(RMST Ratio) (from pilot)",
     Value = params$beta_effect
   )
-  
-  return(list(results_data = results_df, results_plot = p, results_summary = results_summary))
+
+  list(results_data = results_df, results_plot = p, results_summary = results_summary)
 }
 
 # Sample Size Search ------------------------------------------------------
@@ -164,8 +131,8 @@ MS.power.analytical.app <- function(pilot_data, time_var, status_var, arm_var, s
 #' @description Calculates the required sample size for a target power using the analytic
 #'   (approximate) method from Wang et al. (2019).
 #' @inheritParams .estimate_multiplicative_stratified_params
+#' @inheritParams MS.power.analytical.app
 #' @param target_power A single numeric value for the desired power.
-#' @param alpha The significance level (Type I error rate).
 #' @param n_start The starting sample size *per stratum* for the search.
 #' @param n_step The increment in sample size at each step of the search.
 #' @param max_n_per_arm The maximum sample size *per stratum* to search up to.
@@ -175,67 +142,36 @@ MS.power.analytical.app <- function(pilot_data, time_var, status_var, arm_var, s
 MS.ss.analytical.app <- function(pilot_data, time_var, status_var, arm_var, strata_var,
                              target_power, linear_terms = NULL, L, alpha = 0.05,
                              n_start = 50, n_step = 25, max_n_per_arm = 2000,
-                             point_cb = NULL) {
-  
+                             point_cb = NULL, test = c("sandwich", "wls")) {
+  test <- match.arg(test)
+
   # 1. Estimate parameters from pilot data
   params <- .estimate_multiplicative_stratified_params(pilot_data, time_var, status_var, arm_var, strata_var, linear_terms, L)
-  
+
   # 2. Iterative Search for Sample Size
   cat("--- Searching for Sample Size (Method: Analytic/Approximation) ---\n")
-  current_n <- n_start
-  search_path <- list()
-  final_n <- NA_integer_
-  z_alpha <- stats::qnorm(1 - alpha / 2)
-  
-  while (current_n <= max_n_per_arm) {
-    total_n <- current_n * params$n_strata
-    se_final <- params$se_beta_n1 / sqrt(total_n)
-    calculated_power <- stats::pnorm((abs(params$beta_effect) / se_final) - z_alpha)
-    if (!is.finite(calculated_power)) calculated_power <- 0
-    
-    search_path[[as.character(current_n)]] <- calculated_power
-    if (is.function(point_cb)) {
-      try(point_cb(current_n, calculated_power), silent = TRUE)
-    }
-    cat(paste0("  N = ", current_n, "/stratum, Calculated Power = ", round(calculated_power, 3), "\n"))
-    
-    if (calculated_power >= target_power) {
-      final_n <- current_n
-      break
-    }
-    current_n <- current_n + n_step
-  }
-  
-  if (is.na(final_n)) {
-    warning(paste("Target power", target_power, "not achieved by max N of", max_n_per_arm), call. = FALSE)
-    final_n <- max_n_per_arm
-  }
-  
+  search <- .rmst_app_ss_search(
+    params, params$n_strata, target_power, alpha, n_start, n_step, max_n_per_arm, "/stratum",
+    se_test_n1 = if (test == "wls") params$se_beta_model_n1 else NULL,
+    point_cb = point_cb
+  )
+  final_n <- search$final_n
+
   # 3. Finalize and Return Results
   results_summary <- data.frame(Statistic = "Assumed log(RMST Ratio) (from pilot)", Value = params$beta_effect)
   results_df <- data.frame(Target_Power = target_power, Required_N_per_Stratum = final_n)
-  search_path_df <- data.frame(N_per_Stratum = as.integer(names(search_path)), Power = unlist(search_path))
-  
-  p <- ggplot2::ggplot(stats::na.omit(search_path_df), ggplot2::aes(x = N_per_Stratum, y = Power)) +
-    ggplot2::geom_line(color = "#009E73", linewidth = 1) +
-    ggplot2::geom_point(color = "#009E73", size = 3) +
-    ggplot2::geom_text(
-      ggplot2::aes(label = sprintf("N=%s\nP=%.3f", N_per_Stratum, Power)),
-      vjust = -0.6, size = 3, color = "#009E73", check_overlap = TRUE
-    ) +
-    ggplot2::geom_hline(yintercept = target_power, linetype = "dashed", color = "red") +
-    ggplot2::geom_vline(xintercept = final_n, linetype = "dotted", color = "blue") +
-    ggplot2::scale_y_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0.02, 0.12))) +
-    ggplot2::coord_cartesian(ylim = c(0, 1.05), clip = "off") +
-    ggplot2::labs(
-      title = "Analytic Sample Size Search: Multiplicative Stratified RMST Model",
-      subtitle = "Power calculated from formula at each step (approximate method).",
-      x = "Sample Size Per Stratum", y = "Calculated Power"
-    ) + ggplot2::theme_minimal() +
-    ggplot2::theme(plot.margin = ggplot2::margin(10, 20, 10, 10))
-  
+  search_path_df <- search$search_path_df
+  names(search_path_df) <- c("N_per_Stratum", "Power")
+
+  p <- .rmst_app_ss_plot(
+    search_path_df, "N_per_Stratum", final_n, target_power,
+    title = "Analytic Sample Size Search: Multiplicative Stratified RMST Model",
+    subtitle = "Power calculated from formula at each step (approximate method).",
+    xlab = "Sample Size Per Stratum"
+  )
+
   cat("\n--- Calculation Summary ---\n")
   print(knitr::kable(results_df, caption = "Required Sample Size"))
-  
-  return(list(results_data = results_df, results_plot = p, results_summary = results_summary))
+
+  list(results_data = results_df, results_plot = p, results_summary = results_summary)
 }

@@ -14,13 +14,21 @@ DC.power.analytical.app(
   linear_terms = NULL,
   L,
   alpha = 0.05,
-  point_cb = NULL
+  point_cb = NULL,
+  test = c("wls", "sandwich")
 )
 }
 \arguments{
 \item{sample_sizes}{Numeric vector of per-arm sample sizes for power.}
 
 \item{alpha}{Two-sided Type I error (default 0.05).}
+
+\item{point_cb}{Optional callback \code{function(n, power)} for live plotting.}
+
+\item{test}{Which test the reported power refers to. \code{"wls"} (default) is
+the weighted-least-squares t-test, with the sampling distribution from the
+sandwich variance and the rejection threshold from the model-based WLS
+standard error. \code{"sandwich"} is the robust sandwich Wald test.}
 }
 \value{
 A list: \code{results_data} (data.frame), \code{results_plot} (ggplot),

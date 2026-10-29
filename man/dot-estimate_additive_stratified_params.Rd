@@ -15,13 +15,18 @@
 )
 }
 \value{
-A list containing `beta_effect` (the estimated treatment effect) and
-  `se_beta_n1` (the standard error for a sample size of 1).
+A list containing `beta_effect` (the estimated treatment effect),
+  `se_beta_n1` (the sandwich standard error for a sample size of 1),
+  `n_pilot` and `n_strata`.
 }
 \description{
 This internal function contains the common logic for estimating the
-  treatment effect and its variance from pilot data for the additive stratified model.
-  It is called by both the power and sample size calculation functions to avoid
-  code duplication.
+  treatment effect and its variance from pilot data for the additive stratified
+  model (Zhang & Schaubel 2024), ported from RMSTpowerBoost. It is called by both
+  the power and sample size functions and by the app's Repeated method.
+  Censoring weights come from a Cox model for censoring with treatment and
+  \code{linear_terms} as predictors and the stratum as a Cox stratum, and are
+  used as fitted, without capping. The effect is estimated in closed form by
+  stratum-centering, with a sandwich variance.
 }
 \keyword{internal}

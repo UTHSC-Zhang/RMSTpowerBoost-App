@@ -1130,11 +1130,21 @@ ui <- fluidPage(
 )
 
 # ------------------ Repeated Power (model-aware resampling) ------------------
-# Each replicate resamples the pilot data with replacement (within arm, and
-# within stratum for stratified models) and tests the treatment effect using
-# the estimator of the *selected* RMST model -- the same .estimate_*_params
-# helpers used by the Analytical method -- via a Wald z-test at the replicate's
-# realized sample size. Power is the rejection rate across replicates.
+# Each replicate resamples the pilot data with replacement, re-estimates the
+# *selected* RMST model with the same .estimate_*_params helper the Analytical
+# method uses, and applies the test whose power the Analytical method reports by
+# default, so the two methods describe the same test:
+#   * Linear IPCW and Dependent Censoring: the weighted-least-squares t-test
+#     that lm(..., weights = w) reports (test = "wls"). For the linear model
+#     this is the procedure of RMSTpowerBoost::linear.power.boot().
+#   * Multiplicative Stratified: the robust sandwich Wald test (test = "sandwich").
+#   * Additive Stratified: the sandwich Wald test of the stratum-centered estimator.
+# The two-arm models resample n subjects per arm. The stratified models
+# resample n subjects per stratum with the arms pooled, as RMSTpowerBoost's
+# stratified resampling engines do, so N means the sample size per stratum, as
+# in the analytical stratified functions. Power is the rejection rate across
+# replicates; a replicate whose estimator fails (for example, a censoring model
+# that does not converge) is skipped.
 repeated_power_from_pilot <- function(pilot_df, time_var, status_var, arm_var,
                                       n_per_arm_vec, L, alpha = 0.05, R = 500,
                                       model = "Linear IPCW Model",
@@ -1158,13 +1168,14 @@ repeated_power_from_pilot <- function(pilot_df, time_var, status_var, arm_var,
   if (needs_strata && (is.null(strata_var) || !nzchar(strata_var))) {
     stop("The ", model, " requires a mapped stratification column for the Repeated method.", call. = FALSE)
   }
+  # The Analytical method's default test for each model.
+  model_test <- if (model %in% c("Linear IPCW Model", "Dependent Censoring Model")) "wls" else "sandwich"
   if (!is.null(seed) && is.finite(seed)) set.seed(as.integer(seed))
 
   if (needs_strata) {
-    split_stratum <- split(df, df[[strata_var]], drop = TRUE)
-    split_by <- lapply(split_stratum, function(d) split(d, d[[arm_var]], drop = TRUE))
-    split_by <- Filter(function(by_arm) length(by_arm) == 2L, split_by)
-    if (!length(split_by)) stop("No stratum contains both treatment arms.", call. = FALSE)
+    split_by <- split(df, df[[strata_var]], drop = TRUE)
+    has_both_arms <- vapply(split_by, function(d) length(unique(d[[arm_var]])) == 2L, logical(1))
+    if (!any(has_both_arms)) stop("No stratum contains both treatment arms.", call. = FALSE)
   } else {
     split_by <- split(df, df[[arm_var]], drop = TRUE)
   }
@@ -1186,7 +1197,7 @@ repeated_power_from_pilot <- function(pilot_df, time_var, status_var, arm_var,
     )
   }
 
-  wald_p <- function(dat) {
+  test_p <- function(dat) {
     est <- tryCatch({
       # The estimator helpers cat() progress lines; swallow them per replicate.
       out <- NULL
@@ -1195,34 +1206,37 @@ repeated_power_from_pilot <- function(pilot_df, time_var, status_var, arm_var,
       )
       out
     }, error = function(e) NULL)
-    if (is.null(est) || !is.finite(est$beta_effect) || !is.finite(est$se_beta_n1) ||
-        est$se_beta_n1 <= 0) return(NA_real_)
-    se <- est$se_beta_n1 / sqrt(nrow(dat))
+    if (is.null(est) || !is.finite(est$beta_effect)) return(NA_real_)
+    if (identical(model_test, "wls")) {
+      # The t-test that the weighted lm() fit itself reports.
+      cf <- tryCatch(summary(est$fit_wls)$coefficients, error = function(e) NULL)
+      if (is.null(cf) || !est$arm_term %in% rownames(cf)) return(NA_real_)
+      return(unname(cf[est$arm_term, "Pr(>|t|)"]))
+    }
+    if (!is.finite(est$se_beta_n1) || est$se_beta_n1 <= 0) return(NA_real_)
+    se <- est$se_beta_n1 / sqrt(est$n_pilot)
     2 * stats::pnorm(-abs(est$beta_effect) / se)
   }
 
-  resample <- function(n_arm) {
-    if (needs_strata) {
-      blocks <- lapply(split_by, function(by_arm) {
-        do.call(rbind, lapply(by_arm, function(a)
-          a[sample.int(nrow(a), n_arm, replace = TRUE), , drop = FALSE]))
-      })
-      do.call(rbind, blocks)
-    } else {
-      do.call(rbind, lapply(split_by, function(a)
-        a[sample.int(nrow(a), n_arm, replace = TRUE), , drop = FALSE]))
-    }
+  # n subjects per arm (two-arm models) or per stratum, arms pooled (stratified).
+  resample <- function(n) {
+    do.call(rbind, lapply(split_by, function(a)
+      a[sample.int(nrow(a), n, replace = TRUE), , drop = FALSE]))
   }
 
   out <- lapply(n_per_arm_vec, function(n_arm){
     rej <- rep(NA, R)
     for (r in seq_len(R)) {
-      p <- wald_p(resample(n_arm))
+      p <- test_p(resample(n_arm))
       rej[r] <- if (is.finite(p)) (p < alpha) else NA
     }
     m <- mean(rej, na.rm = TRUE); k <- sum(is.finite(rej))
     se <- if (k > 0) sqrt(m*(1-m)/k) else NA_real_
-    row <- data.frame(N_per_arm = n_arm, Power = m, SE = se, Reps = k)
+    row <- if (needs_strata) {
+      data.frame(N_per_stratum = n_arm, Power = m, SE = se, Reps = k)
+    } else {
+      data.frame(N_per_arm = n_arm, Power = m, SE = se, Reps = k)
+    }
     if (is.function(point_cb)) {
       try(point_cb(n_arm, m), silent = TRUE)
     }
@@ -2803,18 +2817,21 @@ server <- function(input, output, session) {
           }
         }
 
+        # Repeated results carry N_per_arm (two-arm models) or N_per_stratum.
+        repeated_n_col <- function(df_power) grep("^N_per_", names(df_power), value = TRUE)[1]
         make_power_plot <- function(df_power, title_suffix = "") {
           pal <- theme_palette()
-          ggplot(df_power, aes(x = N_per_arm, y = Power, group = 1)) +
-            geom_line(size = 1.2, alpha = 0.9, color = pal[1]) +
+          n_col <- repeated_n_col(df_power)
+          ggplot(df_power, aes(x = .data[[n_col]], y = Power, group = 1)) +
+            geom_line(linewidth = 1.2, alpha = 0.9, color = pal[1]) +
             geom_point(size = 3.5, color = pal[2]) +
             geom_text(
-              aes(label = sprintf("N=%s\nP=%.3f", N_per_arm, Power)),
+              aes(label = sprintf("N=%s\nP=%.3f", .data[[n_col]], Power)),
               vjust = -0.6, size = 3, color = pal[2], check_overlap = TRUE
             ) +
             scale_y_continuous(limits = c(0,1), expand = expansion(mult = c(0.02, 0.12))) +
             coord_cartesian(ylim = c(0, 1.05), clip = "off") +
-            labs(x = "Sample size per arm", y = "Power", title = paste("Method:", title_suffix)) +
+            labs(x = x_label_live, y = "Power", title = paste("Method:", title_suffix)) +
             theme(plot.margin = margin(10, 20, 10, 10)) +
             transparent_theme(base_size = 13)
         }
@@ -2854,10 +2871,10 @@ server <- function(input, output, session) {
               point_cb = point_cb
             )
             meet <- subset(power_df, Power >= target_power_input)
-            n_star <- if (nrow(meet)) min(meet$N_per_arm) else NA
+            n_star <- if (nrow(meet)) min(meet[[repeated_n_col(meet)]]) else NA
             results_plot <- make_power_plot(power_df, "repeated") +
               geom_hline(yintercept = target_power_input, linetype = 2) +
-              ggplot2::annotate("text", x = max(power_df$N_per_arm), y = target_power_input,
+              ggplot2::annotate("text", x = max(power_df[[repeated_n_col(power_df)]]), y = target_power_input,
                                 label = sprintf("Target %.2f", target_power_input), hjust = 1, vjust = -0.5, size = 3.5)
             results_data <- power_df
             if (!is.na(n_star)) {
@@ -3231,14 +3248,27 @@ server <- function(input, output, session) {
       }
       div(class = "alert alert-info", txt)
     } else {
-      req_row <- rd[1, , drop = FALSE]
-      req_col <- grep("Required_N", names(req_row), value = TRUE)[1]
-      if (!length(req_col)) return(div(class = "alert alert-warning", "Required sample size is not available in the current output table."))
       target_power <- suppressWarnings(as.numeric(input$target_power %||% 0.8))
       if (!is.finite(target_power)) target_power <- 0.8
+      req_col <- grep("Required_N", names(rd), value = TRUE)
+      n_col <- grep("^N_per_", names(rd), value = TRUE)
+      if (length(req_col)) {
+        req_n <- as.numeric(rd[1, req_col[1]])
+      } else if (length(n_col) && "Power" %in% names(rd)) {
+        # The Repeated search returns its whole power grid: report the smallest
+        # searched N that reaches the target, the point the plot marks.
+        hit <- rd[[n_col[1]]][is.finite(rd$Power) & rd$Power >= target_power]
+        if (!length(hit)) {
+          return(div(class = "alert alert-warning", sprintf(
+            "No searched sample size reached target power %.3f.", target_power)))
+        }
+        req_n <- min(hit)
+      } else {
+        return(div(class = "alert alert-warning", "Required sample size is not available in the current output table."))
+      }
       div(class = "alert alert-info", sprintf(
         "Required sample size is %.3f at target power %.3f.",
-        as.numeric(req_row[[req_col]]),
+        req_n,
         target_power
       ))
     }

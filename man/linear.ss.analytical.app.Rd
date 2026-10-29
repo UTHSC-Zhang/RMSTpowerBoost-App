@@ -16,19 +16,28 @@ linear.ss.analytical.app(
   n_start = 50,
   n_step = 25,
   max_n_per_arm = 2000,
-  point_cb = NULL
+  point_cb = NULL,
+  test = c("wls", "sandwich")
 )
 }
 \arguments{
 \item{target_power}{A single numeric value for the desired power (e.g., 0.80 or 0.90).}
 
-\item{alpha}{The significance level (Type I error rate).}
+\item{alpha}{The significance level for the power calculation (Type I error rate).}
 
 \item{n_start}{The starting sample size *per arm* for the search.}
 
 \item{n_step}{The increment in sample size at each step of the search.}
 
 \item{max_n_per_arm}{The maximum sample size *per arm* to search up to.}
+
+\item{point_cb}{Optional callback \code{function(n, power)} for live plotting.}
+
+\item{test}{Which test the reported power refers to. \code{"wls"} (default) is
+the weighted-least-squares t-test that \code{lm(..., weights = w)} reports,
+with the sampling distribution from the sandwich variance and the rejection
+threshold from the model-based WLS standard error. \code{"sandwich"} is the
+robust sandwich Wald test.}
 }
 \value{
 A `list` containing results.

@@ -21,17 +21,21 @@ export(recipe_quick_aft)
 export(simulate_from_recipe)
 export(validate_recipe)
 importFrom(magrittr,"%>%")
-importFrom(stats,model.matrix)
-importFrom(stats,plogis)
-importFrom(stats,rbeta)
-importFrom(stats,rbinom)
-importFrom(stats,rexp)
-importFrom(stats,rgamma)
-importFrom(stats,rlnorm)
-importFrom(stats,rnorm)
-importFrom(stats,rt)
-importFrom(stats,runif)
-importFrom(stats,rweibull)
-importFrom(stats,uniroot)
-importFrom(utils,head)
-importFrom(utils,tail)
+importFrom(stats,
+  model.matrix,
+  plogis,
+  rbeta,
+  rbinom,
+  rexp,
+  rgamma,
+  rlnorm,
+  rnorm,
+  rt,
+  runif,
+  rweibull,
+  uniroot
+)
+importFrom(utils,
+  head,
+  tail
+)

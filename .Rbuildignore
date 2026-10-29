@@ -12,3 +12,5 @@
 ^app\.R$
 ^www$
 ^manifest\.json$
+^coverage$
+^R/_disable_autoload\.r$

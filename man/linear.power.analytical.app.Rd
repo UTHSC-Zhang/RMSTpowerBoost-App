@@ -13,13 +13,22 @@ linear.power.analytical.app(
   linear_terms = NULL,
   L,
   alpha = 0.05,
-  point_cb = NULL
+  point_cb = NULL,
+  test = c("wls", "sandwich")
 )
 }
 \arguments{
 \item{sample_sizes}{A numeric vector of sample sizes *per arm* to calculate power for.}
 
 \item{alpha}{The significance level for the power calculation (Type I error rate).}
+
+\item{point_cb}{Optional callback \code{function(n, power)} for live plotting.}
+
+\item{test}{Which test the reported power refers to. \code{"wls"} (default) is
+the weighted-least-squares t-test that \code{lm(..., weights = w)} reports,
+with the sampling distribution from the sandwich variance and the rejection
+threshold from the model-based WLS standard error. \code{"sandwich"} is the
+robust sandwich Wald test.}
 }
 \value{
 A `list` containing results.

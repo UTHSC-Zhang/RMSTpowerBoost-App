@@ -16,7 +16,7 @@ This README is for contributors and maintainers: architecture, module boundaries
 ## Repository Architecture
 
 - `app.R`: single-file Shiny shell, UI layout, server orchestration, validation, report hooks, and integration with method engines.
-- `R/`: modeling and simulation engines (analytical + bootstrap variants, diagnostics, recipe simulator, recipe set generation/loading).
+- `R/`: modeling and simulation engines (analytical engines and their shared estimation helpers, recipe simulator, recipe set generation/loading).
 - `data/`: packaged datasets consumed by app methods and tests.
 - `data-raw/`: source material and scripts used to regenerate bundled data assets.
 - `tests/testthat/`: coverage harness and targeted simulation/branch correctness tests.
@@ -56,10 +56,26 @@ Design note: `app.R` intentionally keeps orchestration in one file and delegates
   - multiplicative stratified analytical method implementations.
 - `R/dependent_censoring_analytical_app.R`
   - dependent-censoring analytical estimation and power/sample-size functions.
+- `R/estimation_helpers_app.R`
+  - shared machinery: data preparation, Cox censoring weights, the Wald power
+    formula, the sample-size search, and plotting.
+
+The estimators, censoring weights and power formulas are ported from the
+RMSTpowerBoost package (`R/estimation-helpers.R`), so for the same pilot data the
+app and the package give identical estimates, power and required sample sizes.
+IPCW weights come from conditional Cox censoring models and are used as fitted,
+with no cap or floor. The power functions take a `test` argument with the
+package defaults: the weighted-least-squares t-test for the linear and
+dependent-censoring models, and the sandwich Wald test for the multiplicative
+model. The additive model has a single sandwich Wald test.
 
 The Repeated calculation method resamples the pilot data inside `app.R`
 (`repeated_power_from_pilot`) and reuses the `.estimate_*_params` helpers of
-the selected model, so both methods share one estimator per model.
+the selected model, so both methods share one estimator per model. Each
+replicate applies the same test the Analytical method reports, so the two agree
+within Monte Carlo error. The two-arm models resample per arm; the stratified
+models resample per stratum with arms pooled, so N is per stratum in both
+methods.
 
 ### Simulation and recipe infrastructure
 

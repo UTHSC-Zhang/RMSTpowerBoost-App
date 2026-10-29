@@ -15,7 +15,7 @@
       </div>
       <div class="pb-metric">
         <div class="pb-metric-label">Models</div>
-        <div class="pb-metric-value">IPCW · Stratified · GAM · Dependent censoring</div>
+        <div class="pb-metric-value">IPCW · Stratified · Dependent censoring</div>
       </div>
       <div class="pb-metric">
         <div class="pb-metric-label">Outputs</div>
@@ -183,14 +183,9 @@
           <td><code>strata</code> required</td>
         </tr>
         <tr>
-          <td><strong>Semiparametric (GAM) Model</strong></td>
-          <td>nonlinear covariate effects are plausible and you want flexible adjustment</td>
-          <td>none</td>
-        </tr>
-        <tr>
           <td><strong>Dependent Censoring Model</strong></td>
           <td>censoring may depend on covariates and you want an explicit censoring model</td>
-          <td>choose <em>censoring model covariates</em></td>
+          <td>choose <em>censoring model covariates</em> (also adjusted for in the outcome model)</td>
         </tr>
       </tbody>
     </table>
@@ -229,13 +224,35 @@
     <summary>What “Repeated” does (high level)</summary>
     <div class="pb-details-body">
       <p class="pb-p">
-        For each candidate sample size, the app repeatedly simulates/bootstraps realizations under the pilot-data mechanism,
-        recomputes the test statistic, and estimates power as the rejection proportion at level α.
+        For each candidate sample size, the app resamples the pilot data with replacement, re-estimates the selected model with
+        the same estimator the Analytical method uses, and estimates power as the proportion of replicates in which the treatment
+        effect is significant at level α.
       </p>
+      <ul class="pb-ul">
+        <li>Each replicate applies the test that the Analytical power refers to (see below), so the two methods should agree
+          within Monte Carlo error.</li>
+        <li>The two-arm models (Linear IPCW, Dependent Censoring) resample <code>N</code> subjects per arm. The stratified models
+          resample <code>N</code> subjects per stratum with the arms pooled, so <code>N</code> is the sample size per stratum in
+          both methods.</li>
+        <li>IPCW weights come from conditional Cox censoring models and are used as fitted, with no cap.</li>
+      </ul>
       <ul class="pb-ul">
         <li>Higher <code>R</code> reduces Monte Carlo error (but increases runtime).</li>
         <li>Use a seed when you want reproducibility across runs or reports.</li>
       </ul>
+    </div>
+  </details>
+
+  <details class="pb-details">
+    <summary>Which test the Analytical power refers to</summary>
+    <div class="pb-details-body">
+      <ul class="pb-ul">
+        <li><strong>Linear IPCW</strong> and <strong>Dependent Censoring</strong>: the weighted least-squares t-test that a standard
+          weighted <code>lm()</code> analysis reports, with the estimate's sampling variance taken from the sandwich.</li>
+        <li><strong>Multiplicative Stratified</strong>: the robust sandwich Wald test.</li>
+        <li><strong>Additive Stratified</strong>: the sandwich Wald test of the closed-form stratum-centered estimator.</li>
+      </ul>
+      <p class="pb-p">These match the RMSTpowerBoost package defaults, so the app and the package report the same power.</p>
     </div>
   </details>
 </div>
@@ -300,7 +317,9 @@
   <details class="pb-details">
     <summary>Dependent censoring model fails</summary>
     <div class="pb-details-body">
-      <p class="pb-p">Pick covariates for the censoring Cox model. Avoid including treatment; the app excludes it by design.</p>
+      <p class="pb-p">Pick covariates for the censoring Cox model. Avoid including treatment; the app excludes it by design.
+        With no covariates selected, censoring is modeled without predictors. An error saying the censoring model did not converge
+        usually means too few censored subjects, or a covariate that separates them; drop or coarsen that covariate.</p>
     </div>
   </details>
 
@@ -312,7 +331,7 @@
   </details>
 
   <div class="pb-footer-note">
-    Last updated: 2026-02-07. Reset Workflow is available from the left panel.
+    Last updated: 2026-10-29. Reset Workflow is available from the left panel.
   </div>
 </div>
 

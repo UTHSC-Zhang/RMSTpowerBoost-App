@@ -15,16 +15,23 @@
 )
 }
 \value{
-A list with \code{beta_effect} (arm effect) and \code{se_beta_n1} (SE scaled to N=1).
+A list with \code{beta_effect}, \code{se_beta_n1} (sandwich, n = 1
+  scale), \code{se_beta_model_n1} (model-based weighted-least-squares, n = 1
+  scale), \code{n_pilot}, the weighted fit \code{fit_wls} and \code{arm_term}.
 }
 \description{
 Internal helper for estimating the treatment effect and its variance
-  from pilot data under a single censoring mechanism that depends on covariates.
+  from pilot data under a single censoring mechanism that depends on covariates,
+  ported from RMSTpowerBoost.
 
-This version uses one Cox model for censoring:
-\code{Surv(time, status==0) ~ linear_terms} (treatment excluded by default),
-builds IPCW \eqn{w_i = 1/\hat G(Y_i\mid X_i)} at \eqn{Y_i=\min(T_i,L)}, fits a weighted
-RMST regression, and computes a sandwich variance that ignores uncertainty in \eqn{\hat G}.
+One Cox model for censoring, \code{Surv(time, status==0) ~ linear_terms} with
+Breslow ties and treatment excluded, gives the IPCW
+\eqn{w_i = \Delta_i^Y/\hat G(Y_i\mid X_i)} at \eqn{Y_i=\min(T_i,L)}, pairing the
+uncentered baseline hazard with an uncentered linear predictor. The weights are
+used as fitted, with no cap and no floor on \eqn{\hat G}; with no observed
+censoring they are one and no censoring model is fitted. A weighted RMST
+regression \code{Y ~ arm + linear_terms} is fitted among complete truncated
+outcomes, with a sandwich variance that ignores uncertainty in \eqn{\hat G}.
 }
 \note{
 \code{dep_cens_status_var} is accepted for API compatibility but ignored here.

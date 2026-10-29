@@ -30,6 +30,8 @@ additive.ss.analytical.app(
 \item{n_step}{The increment in sample size at each step of the search.}
 
 \item{max_n_per_arm}{The maximum sample size *per stratum* to search up to.}
+
+\item{point_cb}{Optional callback \code{function(n, power)} for live plotting.}
 }
 \value{
 A list containing the results.

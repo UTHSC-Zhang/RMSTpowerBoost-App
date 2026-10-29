@@ -17,7 +17,8 @@ DC.ss.analytical.app(
   n_start = 50,
   n_step = 25,
   max_n_per_arm = 2000,
-  point_cb = NULL
+  point_cb = NULL,
+  test = c("wls", "sandwich")
 )
 }
 \arguments{
@@ -30,6 +31,13 @@ DC.ss.analytical.app(
 \item{n_step}{Step size for search.}
 
 \item{max_n_per_arm}{Maximum per-arm N to search.}
+
+\item{point_cb}{Optional callback \code{function(n, power)} for live plotting.}
+
+\item{test}{Which test the reported power refers to. \code{"wls"} (default) is
+the weighted-least-squares t-test, with the sampling distribution from the
+sandwich variance and the rejection threshold from the model-based WLS
+standard error. \code{"sandwich"} is the robust sandwich Wald test.}
 }
 \value{
 A list: \code{results_data}, \code{results_plot}, \code{results_summary}.

@@ -1,15 +1,21 @@
 #' @title Internal Helper to Estimate Covariate-Dependent Censoring Model Parameters
 #' @description Internal helper for estimating the treatment effect and its variance
-#'   from pilot data under a single censoring mechanism that depends on covariates.
+#'   from pilot data under a single censoring mechanism that depends on covariates,
+#'   ported from RMSTpowerBoost.
 #'
-#' This version uses one Cox model for censoring:
-#' \code{Surv(time, status==0) ~ linear_terms} (treatment excluded by default),
-#' builds IPCW \eqn{w_i = \Delta_i^Y/\hat G(Y_i\mid X_i)} at \eqn{Y_i=\min(T_i,L)},
-#' fits a weighted RMST regression among complete truncated outcomes, and computes a
-#' sandwich variance that ignores uncertainty in \eqn{\hat G}.
+#' One Cox model for censoring, \code{Surv(time, status==0) ~ linear_terms} with
+#' Breslow ties and treatment excluded, gives the IPCW
+#' \eqn{w_i = \Delta_i^Y/\hat G(Y_i\mid X_i)} at \eqn{Y_i=\min(T_i,L)}, pairing the
+#' uncentered baseline hazard with an uncentered linear predictor. The weights are
+#' used as fitted, with no cap and no floor on \eqn{\hat G}; with no observed
+#' censoring they are one and no censoring model is fitted. A weighted RMST
+#' regression \code{Y ~ arm + linear_terms} is fitted among complete truncated
+#' outcomes, with a sandwich variance that ignores uncertainty in \eqn{\hat G}.
 #'
 #' @note \code{dep_cens_status_var} is accepted for API compatibility but ignored here.
-#' @return A list with \code{beta_effect} (arm effect) and \code{se_beta_n1} (SE scaled to N=1).
+#' @return A list with \code{beta_effect}, \code{se_beta_n1} (sandwich, n = 1
+#'   scale), \code{se_beta_model_n1} (model-based weighted-least-squares, n = 1
+#'   scale), \code{n_pilot}, the weighted fit \code{fit_wls} and \code{arm_term}.
 #' @keywords internal
 #' @export
 .estimate_dependent_censoring_params <- function(pilot_data, time_var, status_var, arm_var, dep_cens_status_var, linear_terms, L) {
@@ -18,62 +24,47 @@
    covariates <- c(arm_var, linear_terms)
    # Ignore dep_cens_status_var in filtering (kept only for API compatibility)
    all_vars <- unique(c(time_var, status_var, covariates))
-   df <- pilot_data[stats::complete.cases(pilot_data[, all_vars, drop = FALSE]), ]
+   df <- .rmst_prepare_df(pilot_data, all_vars, time_var, status_var, L)
    n_pilot <- nrow(df)
    if (n_pilot < 10) stop("Too few complete cases after filtering.", call. = FALSE)
 
-   df$Y_rmst <- pmin(df[[time_var]], L)
-   df$is_event <- df[[status_var]] == 1
-   df$is_complete <- df$is_event | df[[time_var]] >= L
-
    # --- 2) Censoring model: covariate-dependent only (no arm, no competing risks) ---
-   cens_rhs <- if (is.null(linear_terms) || length(linear_terms) == 0) "1" else paste(linear_terms, collapse = " + ")
-   cens_formula <- stats::as.formula(
-      paste0("survival::Surv(", time_var, ", ", status_var, "==0) ~ ", cens_rhs)
-   )
-   fit_cens <- survival::coxph(cens_formula, data = df, ties = "breslow")
-
-   bh <- survival::basehaz(fit_cens, centered = FALSE)
-   H0_step <- stats::stepfun(bh$time, c(0, bh$hazard))
-   lp <- if (cens_rhs == "1") 0 else stats::predict(fit_cens, newdata = df, type = "lp")
-   Hc <- H0_step(df$Y_rmst) * exp(lp)
-   Ghat <- exp(-Hc)
-
-   # IPCW for subjects whose truncated RMST outcome is observed.
-   eps <- 1e-6
-   w <- df$is_complete / pmax(Ghat, eps)
-   w[!is.finite(w)] <- 0
-   if (any(is.finite(w) & w > 0)) {
-      cap <- stats::quantile(w[is.finite(w) & w > 0], 0.99, na.rm = TRUE)
-      w[w > cap] <- cap
-   }
-   df$weights <- w
+   df$weights <- .dc_cox_weights(df, time_var, status_var, linear_terms)
 
    # --- 3) Weighted RMST regression: Y_rmst ~ arm + covariates ---
    model_rhs <- paste(c(arm_var, linear_terms), collapse = " + ")
    model_formula <- stats::as.formula(paste("Y_rmst ~", model_rhs))
    fit_data <- df[df$weights > 0, ]
-   fit_lm <- stats::lm(model_formula, data = fit_data, weights = fit_data$weights)
-   beta_hat <- stats::coef(fit_lm)
-   arm_coeff_name <- arm_var
-   if (!(arm_coeff_name %in% names(beta_hat))) stop("Arm coefficient not found in model.", call. = FALSE)
-   beta_effect <- beta_hat[arm_coeff_name]
+   fit_wls <- stats::lm(model_formula, data = fit_data, weights = fit_data$weights)
+   beta <- stats::coef(fit_wls)
+   if (!(arm_var %in% names(beta))) stop("Arm coefficient not found in model.", call. = FALSE)
+   beta_arm <- beta[arm_var]
 
-   # --- 4) Sandwich variance: A = X' W X / n, B = X' diag((w r)^2) X / n ---
+   # --- 4) Sandwich variance: A = X' W X / n, B = sum_i (x_i w_i r_i)^{ox2} / n ---
    X <- stats::model.matrix(model_formula, data = df)
-   r <- df$Y_rmst - as.numeric(X %*% beta_hat)
-   A_hat <- crossprod(X, X * df$weights) / n_pilot
-   meat <- X * (df$weights * r)
+   r <- df$Y_rmst - as.numeric(X %*% beta)
+   W <- df$weights
+   A_hat <- crossprod(X, X * W) / n_pilot
+   A_hat_inv <- tryCatch({
+      solve(A_hat)
+   }, error = function(e) {
+      stop("The design matrix (A_hat) is singular. This can happen with small pilot datasets or perfect separation.", call. = FALSE)
+   })
+   meat <- X * (W * r)
    B_hat <- crossprod(meat) / n_pilot
+   V_hat_n <- A_hat_inv %*% B_hat %*% t(A_hat_inv)
+   # Model-based weighted-least-squares variance, sigma^2 A^{-1}, on the n = 1
+   # scale: what summary(fit_wls) reports and what the WLS t-test uses.
+   V_model_n <- summary(fit_wls)$sigma^2 * A_hat_inv
 
-   A_hat_inv <- solve(A_hat)
-   V_hat_n <- A_hat_inv %*% B_hat %*% A_hat_inv
-
-   var_beta_pilot <- V_hat_n[colnames(X) == arm_coeff_name, colnames(X) == arm_coeff_name] / n_pilot
-   var_beta_n1 <- as.numeric(var_beta_pilot * n_pilot)
-   se_beta_n1 <- sqrt(var_beta_n1)
-
-   list(beta_effect = beta_effect, se_beta_n1 = se_beta_n1)
+   list(
+      beta_effect = beta_arm,
+      se_beta_n1 = sqrt(V_hat_n[arm_var, arm_var]),
+      se_beta_model_n1 = sqrt(V_model_n[arm_var, arm_var]),
+      n_pilot = n_pilot,
+      fit_wls = fit_wls,
+      arm_term = arm_var
+   )
 }
 # Power Calculation -------------------------------------------------------
 
@@ -83,6 +74,11 @@
 #' @inheritParams .estimate_dependent_censoring_params
 #' @param sample_sizes Numeric vector of per-arm sample sizes for power.
 #' @param alpha Two-sided Type I error (default 0.05).
+#' @param point_cb Optional callback \code{function(n, power)} for live plotting.
+#' @param test Which test the reported power refers to. \code{"wls"} (default) is
+#'   the weighted-least-squares t-test, with the sampling distribution from the
+#'   sandwich variance and the rejection threshold from the model-based WLS
+#'   standard error. \code{"sandwich"} is the robust sandwich Wald test.
 #' @return A list: \code{results_data} (data.frame), \code{results_plot} (ggplot),
 #'   \code{results_summary} (data.frame with pilot effect).
 #' @keywords internal
@@ -96,7 +92,9 @@ DC.power.analytical.app <- function(pilot_data,
                                     linear_terms = NULL,
                                     L,
                                     alpha = 0.05,
-                                    point_cb = NULL) {
+                                    point_cb = NULL,
+                                    test = c("wls", "sandwich")) {
+   test <- match.arg(test)
 
    # 1) Estimate parameters from pilot data
    params <- .estimate_dependent_censoring_params(
@@ -105,36 +103,22 @@ DC.power.analytical.app <- function(pilot_data,
 
    # 2) Power across N
    cat("--- Calculating power for specified sample sizes... ---\n")
-   z_alpha <- stats::qnorm(1 - alpha / 2)
-   power_values <- sapply(sample_sizes, function(n_per_arm) {
-      total_n <- n_per_arm * 2
-      se_final <- params$se_beta_n1 / sqrt(total_n)
-      power <- stats::pnorm((abs(params$beta_effect) / se_final) - z_alpha)
-      if (is.function(point_cb)) {
-         try(point_cb(n_per_arm, power), silent = TRUE)
-      }
-      power
-   })
-
+   power_values <- .rmst_app_power_values(
+      params, sample_sizes, 2, alpha,
+      se_test_n1 = if (test == "wls") params$se_beta_model_n1 else NULL,
+      point_cb = point_cb
+   )
    results_df <- data.frame(N_per_Arm = sample_sizes, Power = power_values)
 
    # 3) Plot + return
-   p <- ggplot2::ggplot(results_df, ggplot2::aes(x = N_per_Arm, y = Power)) +
-      ggplot2::geom_line(color = "#0072B2", linewidth = 1) +
-      ggplot2::geom_point(color = "#0072B2", size = 3) +
-      ggplot2::geom_text(
-         ggplot2::aes(label = sprintf("N=%s\nP=%.3f", N_per_Arm, Power)),
-         vjust = -0.6, size = 3, color = "#0072B2", check_overlap = TRUE
-      ) +
-      ggplot2::scale_y_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0.02, 0.12))) +
-      ggplot2::coord_cartesian(ylim = c(0, 1.05), clip = "off") +
-      ggplot2::labs(
-         title = "Analytic Power Curve: RMST with Covariate-Dependent Censoring (IPCW)",
-         subtitle = "Single censoring mechanism; variance ignores uncertainty in G-hat.",
-         x = "Sample Size Per Arm", y = "Estimated Power"
-      ) +
-      ggplot2::theme_minimal() +
-      ggplot2::theme(plot.margin = ggplot2::margin(10, 20, 10, 10))
+   p <- .rmst_app_power_plot(
+      results_df, "N_per_Arm", "#0072B2",
+      title = "Analytic Power Curve: RMST with Covariate-Dependent Censoring (IPCW)",
+      subtitle = if (test == "wls")
+         "Weighted least-squares t-test; sandwich sampling variance. Single censoring mechanism."
+      else "Sandwich Wald test. Single censoring mechanism; no competing risks.",
+      xlab = "Sample Size Per Arm"
+   )
 
    results_summary <- data.frame(
       Statistic = "Assumed RMST Difference (from pilot)",
@@ -148,8 +132,8 @@ DC.power.analytical.app <- function(pilot_data,
 #' @title Find Sample Size for RMST with Covariate-Dependent Censoring (Analytic)
 #' @description Iterative per-arm N to reach target power using IPCW-based analytic variance.
 #' @inheritParams .estimate_dependent_censoring_params
+#' @inheritParams DC.power.analytical.app
 #' @param target_power Desired power.
-#' @param alpha Two-sided Type I error (default 0.05).
 #' @param n_start Starting per-arm N.
 #' @param n_step Step size for search.
 #' @param max_n_per_arm Maximum per-arm N to search.
@@ -168,7 +152,9 @@ DC.ss.analytical.app <- function(pilot_data,
                                  n_start = 50,
                                  n_step = 25,
                                  max_n_per_arm = 2000,
-                                 point_cb = NULL) {
+                                 point_cb = NULL,
+                                 test = c("wls", "sandwich")) {
+   test <- match.arg(test)
 
    # 1) One-time estimation from pilot data
    params <- .estimate_dependent_censoring_params(
@@ -177,57 +163,24 @@ DC.ss.analytical.app <- function(pilot_data,
 
    # 2) Iterative search
    cat("--- Searching for Sample Size (Method: Analytic) ---\n")
-   z_alpha <- stats::qnorm(1 - alpha / 2)
-   current_n <- n_start
-   search_path <- list()
-   final_n <- NA_integer_
-
-   while (current_n <= max_n_per_arm) {
-      total_n <- 2 * current_n
-      se_final <- params$se_beta_n1 / sqrt(total_n)
-      calculated_power <- stats::pnorm((abs(params$beta_effect) / se_final) - z_alpha)
-      if (!is.finite(calculated_power)) calculated_power <- 0
-
-      search_path[[as.character(current_n)]] <- calculated_power
-      if (is.function(point_cb)) {
-         try(point_cb(current_n, calculated_power), silent = TRUE)
-      }
-      cat(sprintf("  N = %d/arm, Calculated Power = %.3f\n", current_n, calculated_power))
-
-      if (calculated_power >= target_power) { final_n <- current_n; break }
-      current_n <- current_n + n_step
-   }
-
-   if (is.na(final_n)) {
-      warning(paste("Target power", target_power, "not achieved by max N of", max_n_per_arm), call. = FALSE)
-      final_n <- max_n_per_arm
-   }
+   search <- .rmst_app_ss_search(
+      params, 2, target_power, alpha, n_start, n_step, max_n_per_arm, "/arm",
+      se_test_n1 = if (test == "wls") params$se_beta_model_n1 else NULL,
+      point_cb = point_cb
+   )
+   final_n <- search$final_n
 
    # 3) Finalize + return
    results_df <- data.frame(Target_Power = target_power, Required_N_per_Arm = final_n)
-   search_path_df <- data.frame(
-      N_per_Arm = as.integer(names(search_path)),
-      Power = as.numeric(unlist(search_path))
-   )
+   search_path_df <- search$search_path_df
+   names(search_path_df) <- c("N_per_Arm", "Power")
 
-  p <- ggplot2::ggplot(stats::na.omit(search_path_df), ggplot2::aes(x = N_per_Arm, y = Power)) +
-      ggplot2::geom_line(color = "#009E73", linewidth = 1) +
-      ggplot2::geom_point(color = "#009E73", size = 3) +
-      ggplot2::geom_text(
-         ggplot2::aes(label = sprintf("N=%s\nP=%.3f", N_per_Arm, Power)),
-         vjust = -0.6, size = 3, color = "#009E73", check_overlap = TRUE
-      ) +
-      ggplot2::geom_hline(yintercept = target_power, linetype = "dashed", color = "red") +
-      ggplot2::geom_vline(xintercept = final_n, linetype = "dotted", color = "blue") +
-      ggplot2::scale_y_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0.02, 0.12))) +
-      ggplot2::coord_cartesian(ylim = c(0, 1.05), clip = "off") +
-      ggplot2::labs(
-         title = "Analytic Sample Size Search (RMST; Covariate-Dependent Censoring)",
-         subtitle = "IPCW-based; single censoring mechanism.",
-         x = "Sample Size Per Arm", y = "Calculated Power"
-      ) +
-      ggplot2::theme_minimal() +
-      ggplot2::theme(plot.margin = ggplot2::margin(10, 20, 10, 10))
+   p <- .rmst_app_ss_plot(
+      search_path_df, "N_per_Arm", final_n, target_power,
+      title = "Analytic Sample Size Search (RMST; Covariate-Dependent Censoring)",
+      subtitle = "IPCW-based; single censoring mechanism.",
+      xlab = "Sample Size Per Arm"
+   )
 
    cat("\n--- Calculation Summary ---\n")
    print(knitr::kable(results_df, caption = "Required Sample Size"))

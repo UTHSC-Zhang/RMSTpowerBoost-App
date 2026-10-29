@@ -15,10 +15,17 @@
 )
 }
 \value{
-A list containing `beta_effect`, `se_beta_n1`, and `n_strata`.
+A list containing `beta_effect`, `se_beta_n1` (sandwich, n = 1 scale),
+  `se_beta_model_n1` (model-based weighted-least-squares, n = 1 scale),
+  `n_pilot`, `n_strata`, the weighted fit `fit_wls` and `arm_term`.
 }
 \description{
 This internal function contains the common logic for estimating the
-  log-RMST ratio and its variance from pilot data using a log-linear approximation.
+  log-RMST ratio and its variance from pilot data using a log-linear working
+  model (Wang et al. 2019), ported from RMSTpowerBoost. Censoring weights come
+  from a Cox model for censoring with treatment and \code{linear_terms} as
+  predictors and the stratum as a Cox stratum, and are used as fitted, without
+  capping. The working model is fitted by weighted least squares and its
+  variance is the robust sandwich of the estimating equations.
 }
 \keyword{internal}
