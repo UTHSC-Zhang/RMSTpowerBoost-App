@@ -21,7 +21,7 @@ This README is for contributors and maintainers: architecture, module boundaries
 - `data-raw/`: source material and scripts used to regenerate bundled data assets.
 - `tests/testthat/`: coverage harness and targeted simulation/branch correctness tests.
 - `.github/workflows/`: CI automation for coverage upload and package sync.
-- `coverage/`: generated coverage artifacts tracked for upload and diagnostics.
+- `coverage/`: locally generated coverage artifacts; CI generates its own report for every commit.
 - `tools/`: local engineering utilities (for example, coverage artifact generation/upload helper).
 - `codecov.yml`: Codecov policy (thresholds, precision, rounding, ignore patterns).
 - `DESCRIPTION` and `NAMESPACE`: package metadata/imports and exported function surface.
@@ -166,9 +166,10 @@ source("tools/run_codecov_local.R")
 
 Workflow behavior in `.github/workflows/codecov_sync.yml`:
 
-- CI checks whether `coverage/cobertura.xml` exists in the commit.
-- If present, CI uploads that file to Codecov using repository secret `CODECOV_TOKEN`.
-- If missing, CI skips upload and writes diagnostics into the job summary (including tracked files and directory listing).
+- On every push to `main` and every pull request, CI installs the dependencies listed in `DESCRIPTION`, runs `covr::package_coverage()`, and writes a fresh `coverage/cobertura.xml`.
+- CI uploads that fresh report to Codecov using repository secret `CODECOV_TOKEN`.
+- CI never uploads the committed `coverage/` files. Codecov discards a report whose timestamp is more than 12 hours old, so re-uploading a committed report records 0% for the new commit.
+- The renv autoloader is disabled in CI (`RENV_CONFIG_AUTOLOADER_ENABLED=false`), and `.Rprofile` skips its `git pull` when the `CI` variable is set.
 
 -----
 

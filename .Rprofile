@@ -5,7 +5,9 @@ if (!isTRUE(getOption("rmstpb.profile.initialized", FALSE))) {
     source("renv/activate.R")
   }
 
-  if (dir.exists(".git") && !isTRUE(getOption("rmstpb.gitpull.ran", FALSE))) {
+  # Skip on CI runners, where pulling would change the commit being tested.
+  if (dir.exists(".git") && !nzchar(Sys.getenv("CI")) &&
+      !isTRUE(getOption("rmstpb.gitpull.ran", FALSE))) {
     options(rmstpb.gitpull.ran = TRUE)
     try({
       message("Running git pull...")

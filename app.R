@@ -1276,18 +1276,18 @@ server <- function(input, output, session) {
       tags$h4(class = "section-title", "Coverage"),
       tags$p(
         tags$a(
-          href = "https://codecov.io/github/arnabaich96/RMSTpowerBoost-App",
+          href = "https://codecov.io/github/UTHSC-Zhang/RMSTpowerBoost-App",
           target = "_blank",
           rel = "noopener noreferrer",
           tags$img(
-            src = "https://codecov.io/github/arnabaich96/RMSTpowerBoost-App/graph/badge.svg?token=5C7QOI1GAB",
+            src = "https://codecov.io/github/UTHSC-Zhang/RMSTpowerBoost-App/graph/badge.svg?token=RLAPUB8Q6I",
             alt = "Codecov badge"
           )
         )
       ),
       tags$p(
         tags$a(
-          href = "https://codecov.io/github/arnabaich96/RMSTpowerBoost-App/graphs/sunburst.svg?token=5C7QOI1GAB",
+          href = "https://codecov.io/github/UTHSC-Zhang/RMSTpowerBoost-App/graphs/sunburst.svg?token=RLAPUB8Q6I",
           target = "_blank",
           rel = "noopener noreferrer",
           "Coverage sunburst report"
